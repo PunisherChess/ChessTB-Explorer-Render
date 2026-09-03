@@ -1,0 +1,396 @@
+openapi: "3.0.3"
+info:
+  title: ChessTB Explorer API
+  version: "1.0.0"
+  description: |
+    Chess endgame tablebase probe API.
+    Submit a FEN position and receive ranked move lists for Distance to Zeroing (DTZ),
+    Distance to Conversion (DTC), Distance to Mate (DTM), and DTM under the 50-move rule (DTM50).
+
+paths:
+  /probe:
+    post:
+      operationId: probePosition
+      summary: Probe a chess position (buffered response)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProbeRequest"
+            example:
+              fen: "4k3/8/8/8/8/8/8/4K2R w - - 0 1"
+      responses:
+        "200":
+          description: Successful probe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProbeResponse"
+        "400":
+          description: Invalid FEN, empty body, or missing tablebase coverage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body exceeds 4 KB limit
+        "429":
+          description: >-
+            Rate limit exceeded (PROBE_RATE_LIMIT, per client IP).
+            Retrying after a short wait should succeed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >-
+            Remote (URL) tablebase entries only: the tablebase's HTTP
+            source couldn't be reached for this probe. Retrying may
+            succeed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >-
+            Two distinct causes, both with this status code: (1) tablebase
+            not initialised (none of TABLEBASE_PATH, TABLEBASE_PATH_7_8,
+            or TABLEBASE_PATH_CASTLING opened successfully) — no
+            error_code is set on the response body in this case; (2) an
+            in-flight probe of this FEN by another concurrent request didn't
+            finish within PROBE_TIMEOUT_SECS (error_code=probe_timeout).
+            Retrying may succeed for case (2).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+
+  /probe/stream:
+    post:
+      operationId: probePositionStream
+      summary: Probe a chess position with SSE streaming progress
+      description: |
+        Identical to /probe but returns text/event-stream.
+        Each SSE event has a JSON payload in its data field.
+        Events are emitted as child positions are probed, followed by the
+        final result or an error event. An error event with
+        error_code=probe_timeout means a concurrent request was already
+        probing the same FEN and didn't finish in time; retrying is
+        usually cheap and likely to resolve.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProbeRequest"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ProgressEvent"
+                  - $ref: "#/components/schemas/DoneEvent"
+                  - $ref: "#/components/schemas/ErrorEvent"
+        "429":
+          description: >-
+            Rate limit exceeded (PROBE_RATE_LIMIT, per client IP), returned
+            before the stream opens. Retrying after a short wait should
+            succeed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Tablebase readiness check
+      responses:
+        "200":
+          description: Tablebase loaded and ready
+        "503":
+          description: Tablebase not initialised
+
+  /admin/cache/stats:
+    get:
+      operationId: cacheStats
+      summary: LRU cache hit-rate statistics
+      security:
+        - adminBearer: []
+        - adminSession: []
+      responses:
+        "200":
+          description: Cache statistics
+        "401":
+          description: Admin authentication required
+        "503":
+          description: Admin panel disabled (ADMIN_TOKEN not configured)
+
+  /admin/cache/clear:
+    post:
+      operationId: cacheClear
+      summary: Purge both LRU caches
+      security:
+        - adminBearer: []
+        - adminSession: []
+      responses:
+        "200":
+          description: Caches cleared
+        "401":
+          description: Admin authentication required
+        "503":
+          description: Admin panel disabled (ADMIN_TOKEN not configured)
+
+  /admin/login:
+    post:
+      operationId: adminLogin
+      summary: Start an admin session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Value of ADMIN_TOKEN (config.py's "Admin" section)
+      responses:
+        "200":
+          description: Session started; response sets the admin session cookie
+        "401":
+          description: Incorrect token
+        "503":
+          description: Admin panel disabled (ADMIN_TOKEN not configured)
+
+  /admin/logout:
+    post:
+      operationId: adminLogout
+      summary: End the admin session
+      responses:
+        "200":
+          description: Session ended
+
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      description: "Authorization: Bearer <ADMIN_TOKEN>"
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie set by a successful POST /admin/login
+  schemas:
+    ProbeRequest:
+      type: object
+      required: [fen]
+      properties:
+        fen:
+          type: string
+          description: >-
+            FEN notation (4–6 fields; shorter forms are auto-padded). A
+            castling-availability field naming a right with no matching
+            king and rook on its home square is rejected with a 400
+            response; a right that does have one is accepted and probed
+            (see TABLEBASE_PATH_CASTLING in the project README).
+          example: "4k3/8/8/8/8/8/8/4K2R w - - 0 1"
+
+    MoveEntry:
+      type: object
+      properties:
+        san:
+          type: string
+          description: Standard Algebraic Notation of the move
+        plies:
+          type: integer
+          description: >-
+            Distance in plies. 1 for a move that delivers immediate
+            checkmate (the move itself is the mate); 0 for a move that
+            ends the game immediately as a draw (stalemate or insufficient
+            material), for an unprobed/unknown move, or when available is
+            false.
+        order:
+          type: integer
+          description: >-
+            DTC only: pawn pushes still owed before this move's line
+            reaches its next capture or promotion (see chess.chesstb's
+            probe_dtc/ProbeResult docs). Always 0 for dtz/dtm/dtm50
+            entries. 0 for a DTC entry when the move itself is a capture
+            or a promotion, or when it ends the game outright (checkmate
+            or an immediate draw) — nothing more is owed once the game is
+            decided or the conversion has already happened. A quiet pawn
+            push does not settle the count: it only pays down one of the
+            pushes still owed.
+        is_mate:
+          type: boolean
+          description: True if this move delivers immediate checkmate
+        outcome:
+          type: string
+          enum: [win, cursed_win, draw, blessed_loss, loss, unknown, not_available]
+        available:
+          type: boolean
+          description: >-
+            False when this material's tablebase has no table for this
+            entry's metric (DTZ, DTC, DTM, or DTM50 — WDL is always
+            available), in which case outcome is flatly not_available and
+            plies/order are 0. No metric's row ever derives its answer
+            from another metric.
+        child_fen:
+          type: string
+          nullable: true
+          description: FEN of the position after this move; null for terminal positions
+        draw_reason:
+          type: string
+          nullable: true
+          enum: [stalemate, insufficient_material, null]
+          description: Reason for a draw outcome that ends the game immediately; null otherwise
+
+    Summary:
+      type: object
+      description: Outcome distribution across all legal moves
+      properties:
+        wins:    {type: integer}
+        draws:   {type: integer}
+        losses:  {type: integer}
+        unknown: {type: integer}
+
+    ProbeResponse:
+      type: object
+      properties:
+        wdl:
+          type: integer
+          enum: [-2, -1, 0, 1, 2]
+          description: Root position WDL (2=win, 1=cursed win, 0=draw, -1=blessed loss, -2=loss)
+        dtz:
+          type: integer
+          nullable: true
+          description: >-
+            Distance to Zeroing (DTZ) in plies; null when
+            dtz_available is false
+        dtz_available:
+          type: boolean
+          description: False when this material's tablebase has no DTZ table
+        dtc:
+          type: array
+          items:
+            type: integer
+            nullable: true
+          minItems: 3
+          maxItems: 3
+          description: >-
+            [wdl_under_dtc, pawn_pushes_still_owed, plies_to_next_conversion]
+            — Distance to Conversion (DTC), mirroring chess.chesstb's
+            probe_dtc() return shape; [null, null, null] when dtc_available
+            is false. DTC is always rule50-aware (probed at the position's
+            own halfmove clock, like DTM50), so wdl_under_dtc can differ
+            from the root wdl above the same way dtm50's own wdl can.
+        dtc_available:
+          type: boolean
+          description: >-
+            False when this material's tablebase has no DTC table. A
+            .lzdtc table only exists for material with at least one pawn;
+            chess.chesstb derives an equivalent DTC answer from DTZ/WDL for
+            pawnless material instead, so this is False in practice only
+            when a pawnful material's own DTC table hasn't been generated.
+        dtm:
+          type: integer
+          nullable: true
+          description: Distance to Mate in plies; null when dtm_available is false
+        dtm_available:
+          type: boolean
+          description: False when this material's tablebase has no DTM table
+        dtm50:
+          type: array
+          items:
+            type: integer
+            nullable: true
+          minItems: 2
+          maxItems: 2
+          description: >-
+            [wdl_under_50move_rule, plies_to_mate_under_50move_rule];
+            [null, null] when dtm50_available is false
+        dtm50_available:
+          type: boolean
+          description: False when this material's tablebase has no DTM50 table
+        draw_reason:
+          type: string
+          nullable: true
+          enum: [stalemate, insufficient_material, null]
+          description: Reason the root position itself is an immediate draw; null otherwise
+        moves_dtz:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoveEntry"
+          description: All legal moves ranked by Distance to Zeroing (best first)
+        moves_dtc:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoveEntry"
+          description: >-
+            All legal moves ranked by Distance to Conversion (best first);
+            ranked by pawn pushes still owed first, then plies (DTC's own
+            notion of a better line — see MoveEntry.order)
+        moves_dtm:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoveEntry"
+          description: All legal moves ranked by Distance to Mate (best first)
+        moves_dtm50:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoveEntry"
+          description: All legal moves ranked by DTM under the 50-move rule (best first)
+        summary:
+          $ref: "#/components/schemas/Summary"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        error_code:
+          type: string
+          enum: [missing_table, remote_unavailable, probe_timeout]
+          description: >-
+            Machine-readable error code (only present for specific errors).
+            remote_unavailable only occurs with a remote (URL)
+            TABLEBASE_PATH, when its HTTP source couldn't be reached.
+            probe_timeout means a concurrent request was already probing
+            this same FEN and didn't finish within PROBE_TIMEOUT_SECS;
+            retrying is generally cheap and likely to succeed, since the
+            original probe has usually finished and been cached by then.
+        piece_count:
+          type: integer
+          nullable: true
+          description: Number of pieces on the board (only when error_code=missing_table)
+
+    ProgressEvent:
+      type: object
+      properties:
+        status: {type: string, enum: [probing]}
+        completed: {type: integer}
+        total: {type: integer}
+
+    DoneEvent:
+      allOf:
+        - $ref: "#/components/schemas/ProbeResponse"
+        - type: object
+          properties:
+            status: {type: string, enum: [done]}
+
+    ErrorEvent:
+      type: object
+      properties:
+        status: {type: string, enum: [error]}
+        error: {type: string}
+        error_code: {type: string, enum: [missing_table, remote_unavailable, probe_timeout]}
+        piece_count: {type: integer, nullable: true}

@@ -1,0 +1,88 @@
+# render.yaml — Render Blueprint for ChessTB Explorer
+#
+# Deploys this repository as a single Docker web service on Render,
+# straight from GitHub. See README.md's "Deploying to Render" section
+# for the full walkthrough (including the manual, non-Blueprint path);
+# the short version:
+#
+#   1. Push this repository to GitHub.
+#   2. In the Render Dashboard: New -> Blueprint -> connect the repo.
+#      Render finds this file automatically.
+#   3. You'll be prompted for TABLEBASE_PATH (see below) before the
+#      first deploy runs. ADMIN_TOKEN and FLASK_SECRET_KEY are generated
+#      for you automatically -- nothing to type for those.
+#
+# Every push to the connected branch redeploys automatically afterwards
+# -- Render deploys directly from the GitHub repo it's connected to, no
+# separate mirroring step or workflow needed.
+#
+# See https://render.com/docs/blueprint-spec for the full field
+# reference if you want to customize this beyond what's here.
+
+services:
+  - type: web
+    name: chesstb-explorer
+    runtime: docker
+    # dockerfilePath/dockerContext default to ./Dockerfile and the repo
+    # root, which is exactly this project's layout -- nothing to set.
+
+    # "starter" gives a full, dedicated vCPU -- worth it here since
+    # probing (tablebase block decompression) is CPU-bound. "free" also
+    # works for casual/demo use: swap the line below to `plan: free`,
+    # but expect the service to spin down after periods of inactivity
+    # (slow first request after a wake-up) and a smaller CPU/RAM share,
+    # which mainly shows up as slower probes rather than incorrect ones.
+    # See README.md "Deploying to Render" for more on sizing.
+    plan: free
+    region: oregon   # pick whichever Render region is closest to you / your tablebase host
+
+    # Matches the GET /health route in app.py: 200 once at least one of
+    # TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING has
+    # opened successfully, 503 ("degraded") otherwise -- so Render won't
+    # mark a deploy healthy until a tablebase is actually reachable and
+    # probing.
+    healthCheckPath: /health
+
+    envVars:
+      # The one setting every deployment genuinely differs on, so it's
+      # prompted for here (sync: false) instead of hardcoded. Point this
+      # at an http(s):// base URL serving the ChessTB layout remotely
+      # (see README.md "Getting the tablebase files") -- REMOTE_MODE
+      # defaults to "direct" in config.py, so nothing is written to
+      # Render's (ephemeral, and for a set this size, impractically
+      # small and expensive) local disk.
+      - key: TABLEBASE_PATH
+        sync: false
+
+      # Optional. A separate base URL for 7-8 man positions and for
+      # castling-rights positions, respectively -- see README.md "Getting
+      # the tablebase files" for the recommended layout, which also gets
+      # faster probing on 3-6 man positions. Left empty (the default
+      # here), each falls back to TABLEBASE_PATH. Fill in from the
+      # service's "Environment" tab in the Render Dashboard at any time;
+      # app.py picks up the new value on the next restart.
+      - key: TABLEBASE_PATH_7_8
+        value: ""
+      - key: TABLEBASE_PATH_CASTLING
+        value: ""
+
+      # Both generated automatically -- Render fills in a random value
+      # at deploy time and stores it as a secret env var. Rotate either
+      # from the service's "Environment" tab in the Render Dashboard at
+      # any time; app.py picks up the new value on the next restart.
+      # ADMIN_TOKEN gates /admin and /admin/cache/*; leaving it
+      # ungenerated (delete the block below) is also valid -- those
+      # routes just respond 503 until a token is set, same as if
+      # ADMIN_TOKEN were left unset entirely.
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+
+      # Not set here: PORT is injected by Render itself at deploy time,
+      # and config.py already reads it (falling back to 7860 only when
+      # PORT isn't present, e.g. running the same image locally) -- see
+      # config.py's "Server" section. GITHUB_URL is also left unset;
+      # add it as a plain env var from the dashboard, or edit the
+      # literal default in config.py, if you want the header's GitHub
+      # button to appear.
