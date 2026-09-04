@@ -79,6 +79,14 @@ services:
       - key: FLASK_SECRET_KEY
         generateValue: true
 
+      # config.py's own default targets this project's plain-HTTP local
+      # deployment. Render always terminates TLS in front of the app, so
+      # the browser reaches it over HTTPS regardless of this internal
+      # hop -- see config.py's "Admin" section for what SESSION_COOKIE_SECURE
+      # governs.
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+
       # Not set here: PORT is injected by Render itself at deploy time,
       # and config.py already reads it (falling back to 7860 only when
       # PORT isn't present, e.g. running the same image locally) -- see

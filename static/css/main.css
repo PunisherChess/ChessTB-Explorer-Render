@@ -1268,7 +1268,6 @@ cg-board square.check {
 .moves-table th.group-dtm50:not(.col-score){ border-left: 1px solid var(--border-2); }
 
 /* ── Column header row (Move / Score labels) ────────────────────────── */
-/* Column header row (Move / Score labels) */
 .moves-table thead tr.col-row th {
     font-size: 0.59375rem;
     font-weight: 700;
@@ -1279,9 +1278,6 @@ cg-board square.check {
     padding: 0.1875rem 0.5rem 0.4375rem;
     border-bottom: 1px solid var(--border-2);
     white-space: nowrap;
-    /* Added: prevent "MOVE" from spilling into "SCORE" */
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 /* Override group-boundary padding for col-row: add left spacing after
    border — :not(.col-score) for the same reason as the border rules
@@ -1820,19 +1816,12 @@ body.admin-page {
        resize width — only the desktop rule above is narrowed. */
     .pgn-col { width: 18.75rem; }
 
-	.moves-scroll {
-		flex: 1;
-		min-height: 0;
-		overflow-y: auto;
-		overflow-x: auto; /* Changed from 'hidden' to 'auto' to allow scrolling if constrained */
-	}
-
-	.moves-table {
-		width: 100%;
-		min-width: 38rem; /* Added: Ensures all 9 columns always have adequate space */
-		border-collapse: collapse;
-		table-layout: fixed;
-	}
+    /* The 9-column moves table stays at a legible fixed width and
+       scrolls horizontally instead of shrinking its columns illegibly
+       thin — table-layout:fixed's percentage columns would otherwise
+       resolve against whatever narrow width the column ends up with. */
+    .moves-scroll { overflow-x: auto; }
+    .moves-table { min-width: 640px; }
 }
 
 /* ── Phone: swipeable screens + single-metric moves table ────────────────

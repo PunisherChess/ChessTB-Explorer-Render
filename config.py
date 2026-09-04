@@ -247,6 +247,48 @@ REMOTE_POOL_MAXSIZE = None
 # setting gets throttled, or lower it if the deployment sees abuse.
 PROBE_RATE_LIMIT = "60 per minute"
 
+# Per-client-IP limit on /admin/login (config.py's ADMIN_TOKEN check),
+# same string syntax as PROBE_RATE_LIMIT above and backed by the same
+# in-process memory store. Separate from PROBE_RATE_LIMIT because
+# /admin/login is a brute-forceable shared-secret check, not a CPU-bound
+# probe -- it needs a tighter limit than "comfortably covers normal
+# browsing" calls for. Applies to both failed and successful login
+# attempts. Left empty, login attempts are not rate limited at all.
+ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
+
+# Number of trusted reverse-proxy hops in front of this application.
+# PROBE_RATE_LIMIT and ADMIN_LOGIN_RATE_LIMIT above both key on the
+# client's IP address (request.remote_addr) -- behind a reverse proxy
+# that's the proxy's own address unless it's corrected for, which would
+# collapse every client behind that proxy onto one shared rate-limit key.
+# The same trusted-hop count also governs whether X-Forwarded-Proto is
+# trusted, which corrects request.scheme / request.is_secure (and any
+# externally-generated URL) when TLS terminates at that reverse proxy
+# rather than at this app itself.
+#
+# In production (DEBUG = False), app.py passes this to waitress's own
+# trusted_proxy_count, since waitress -- the actual production WSGI
+# server -- parses X-Forwarded-For/X-Forwarded-Proto and corrects
+# REMOTE_ADDR/wsgi.url_scheme itself, before Flask ever sees the request.
+# app.py also applies Werkzeug's ProxyFix with the same count, which
+# makes the equivalent correction for the DEBUG = True Flask-dev-server
+# path (waitress isn't involved there at all); under waitress it's
+# redundant with, and superseded by, waitress's own handling, but
+# harmlessly so.
+#
+# 1 is correct for this project's own render.yaml / "Deploying to Render"
+# topology: Render's platform edge/load-balancer sits in front of a web
+# service exactly once. Raise it to match your own deployment if you put
+# another reverse proxy (e.g. Cloudflare, an nginx instance) in front of
+# that. Set to 0 only for a deployment with no reverse proxy in front of
+# it at all (e.g. running directly on a single machine with nothing else
+# listening) -- a value here that doesn't match the real proxy chain
+# leaves the rate limiter keying on the wrong address (or the scheme
+# misdetected), or (set too high for no proxy at all) trusting a
+# client-supplied X-Forwarded-For/X-Forwarded-Proto header directly,
+# letting a client spoof its own rate-limit key or apparent scheme.
+TRUSTED_PROXY_COUNT = int(os.environ.get("TRUSTED_PROXY_COUNT", 1))
+
 # ── Admin ────────────────────────────────────────────────────────────────────
 
 # Shared secret required to reach /admin, /admin/cache/stats, and
@@ -268,6 +310,28 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 # persistent value if that's undesirable (e.g. behind a load balancer
 # with multiple replicas, or to survive routine restarts).
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
+
+# Whether the admin session cookie set by /admin/login requires HTTPS.
+# Independent of DEBUG above -- DEBUG is a development/runtime behavior
+# switch, not a reliable indicator of the deployment's transport security,
+# so a deployment can legitimately run DEBUG=False (production-like
+# behavior) while still being served over plain HTTP (e.g. local
+# integration testing, an internal-only environment). Setting this True
+# for such a deployment sets the cookie Secure, which a browser then
+# won't send back over a plain HTTP connection -- /admin/login would
+# appear to succeed while every subsequent authenticated /admin/* request
+# came back 401.
+#
+# Read from the SESSION_COOKIE_SECURE environment variable ("true"/
+# "false", case-insensitive; anything else is False), defaulting to False
+# to match this project's documented default local deployment --
+# http://127.0.0.1:7860, plain HTTP. Set the environment variable to
+# "true" for any deployment the browser reaches over HTTPS, including one
+# behind a TLS-terminating reverse proxy such as Render's (the browser's
+# own connection is what the Secure attribute governs, not the internal
+# hop between the proxy and this process) -- render.yaml already does
+# this for Render deployments.
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
 
 # ── Links ────────────────────────────────────────────────────────────────────
 

@@ -35,6 +35,8 @@ session cookie started via /admin/login, or an "Authorization: Bearer
 
 /probe and /probe/stream are rate-limited per client IP (config.py's
 PROBE_RATE_LIMIT); a client over the limit gets a 429 with a JSON body.
+/admin/login has its own, separate limit (config.py's
+ADMIN_LOGIN_RATE_LIMIT), covering both failed and successful attempts.
 
 Each move entry includes a child_fen so the client can pre-fetch the next
 probe, and each response includes a summary of wins/draws/losses/unknown
@@ -76,6 +78,7 @@ from flask_limiter.util import get_remote_address
 from functools import lru_cache, wraps
 from typing import NamedTuple, TypedDict
 from waitress import serve as waitress_serve
+from werkzeug.middleware.proxy_fix import ProxyFix
 import atexit
 import chess
 import config
@@ -246,6 +249,9 @@ class AppConfig:
     secret_key:              str   = field(default="")
     github_url:              str   = field(default="")
     probe_rate_limit:        str   = field(default="")
+    admin_login_rate_limit:  str   = field(default="5 per minute")
+    trusted_proxy_count:     int   = field(default=1)
+    session_cookie_secure:   bool  = field(default=True)
 
     @classmethod
     def from_config(cls) -> "AppConfig":
@@ -301,6 +307,12 @@ class AppConfig:
             github_url=_validated_str("GITHUB_URL", getattr(config, "GITHUB_URL", "")),
             probe_rate_limit=_validated_str(
                 "PROBE_RATE_LIMIT", getattr(config, "PROBE_RATE_LIMIT", "")),
+            admin_login_rate_limit=_validated_str(
+                "ADMIN_LOGIN_RATE_LIMIT", getattr(config, "ADMIN_LOGIN_RATE_LIMIT", "5 per minute")),
+            trusted_proxy_count=_validated_int(
+                "TRUSTED_PROXY_COUNT", getattr(config, "TRUSTED_PROXY_COUNT", 1), min_val=0, max_val=10),
+            session_cookie_secure=_validated_bool(
+                "SESSION_COOKIE_SECURE", getattr(config, "SESSION_COOKIE_SECURE", True)),
         )
 
 
@@ -339,10 +351,43 @@ app.config["MAX_CONTENT_LENGTH"] = 4 * 1024   # 4 KB
 app.secret_key = cfg.secret_key or secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Secure requires HTTPS, which local (DEBUG=True) development typically
-# doesn't have -- restricted to non-debug runs so the login form still
-# works when testing locally.
-app.config["SESSION_COOKIE_SECURE"] = not cfg.debug
+# Independent of cfg.debug -- see config.py's SESSION_COOKIE_SECURE for
+# why: DEBUG is a development/runtime behavior switch, not a reliable
+# indicator of whether the browser reaches this deployment over HTTPS.
+app.config["SESSION_COOKIE_SECURE"] = cfg.session_cookie_secure
+
+# Without this, request.remote_addr -- and therefore get_remote_address()
+# below, which keys both rate limiters -- is whichever host made the TCP
+# connection to this process. Behind a reverse proxy (Render's own
+# edge/load-balancer in front of the render.yaml deployment this project
+# ships with, or any other reverse proxy placed in front of it) that's the
+# proxy's own address, not the actual client's, so every client sharing
+# that proxy would collapse onto one rate-limit key. ProxyFix instead
+# trusts exactly cfg.trusted_proxy_count X-Forwarded-For hops closest to
+# this app and reads the real client IP from ahead of them -- set to 0
+# this is a no-op, appropriate only for a deployment with no reverse proxy
+# in front of it at all (an untrusted client's own X-Forwarded-For header
+# would otherwise be trusted, letting it spoof its rate-limit key).
+#
+# x_proto does the equivalent correction for X-Forwarded-Proto, which a
+# TLS-terminating reverse proxy sets to tell this app the scheme the
+# client actually connected with -- without it, request.scheme /
+# request.is_secure (and any URL this app builds with
+# url_for(..., _external=True)) would read as plain http:// even when the
+# client's own connection was https://, since Flask only ever sees the
+# proxy's own (typically-HTTP) hop to this app. Same trusted-hop count as
+# x_for, for the same reason: a value here that doesn't match the real
+# proxy chain either misreads the scheme or lets a client spoof it.
+#
+# This only actually matters for cfg.debug's Flask-dev-server path below --
+# under waitress (cfg.debug False, the production path), waitress parses
+# X-Forwarded-For and corrects REMOTE_ADDR itself before this app ever
+# sees the request, taking priority over -- and making redundant, but
+# harmlessly so -- the correction this makes. See the waitress_serve(...)
+# call below for that side of it.
+if cfg.trusted_proxy_count > 0:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=cfg.trusted_proxy_count, x_proto=cfg.trusted_proxy_count)
 
 
 @app.errorhandler(413)
@@ -351,12 +396,16 @@ def request_too_large(e: Exception) -> tuple:
 
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
-# Per-IP limit on /probe and /probe/stream (see config.py's PROBE_RATE_LIMIT
-# and README.md's "Security notes") -- the app's two public, unauthenticated,
-# CPU-bound endpoints. default_limits=[] means nothing is limited except the
-# routes explicitly decorated with @_probe_rate_limit below; the in-memory
-# storage is per-process, which is enough for a single-container deployment
-# but doesn't share state across multiple replicas.
+# Per-IP limits on /probe, /probe/stream (config.py's PROBE_RATE_LIMIT --
+# the app's two public, unauthenticated, CPU-bound endpoints) and, separately,
+# /admin/login (config.py's ADMIN_LOGIN_RATE_LIMIT -- see README.md's
+# "Security notes"). default_limits=[] means nothing is limited except the
+# routes explicitly decorated with @_probe_rate_limit / @_admin_login_rate_limit
+# below; the in-memory storage is per-process, which is enough for a
+# single-container deployment but doesn't share state across multiple
+# replicas. key_func reads request.remote_addr, which ProxyFix (see the
+# Flask app section above) has already corrected for cfg.trusted_proxy_count
+# reverse-proxy hops.
 limiter = Limiter(
     key_func=get_remote_address, app=app, default_limits=[], storage_uri="memory://")
 app.config["RATELIMIT_HEADERS_ENABLED"] = True
@@ -369,6 +418,16 @@ def _probe_rate_limit(view):
     if not cfg.probe_rate_limit:
         return view
     return limiter.limit(cfg.probe_rate_limit)(view)
+
+
+def _admin_login_rate_limit(view):
+    # Independent of _probe_rate_limit above -- /admin/login is a
+    # brute-forceable shared-secret check, not a CPU-bound probe, so it
+    # gets its own (much tighter) limit rather than reusing or being
+    # covered by PROBE_RATE_LIMIT.
+    if not cfg.admin_login_rate_limit:
+        return view
+    return limiter.limit(cfg.admin_login_rate_limit)(view)
 
 
 @app.errorhandler(429)
@@ -1271,7 +1330,7 @@ evaluate_fen.cache_info  = _evaluate_fen_cached.cache_info   # type: ignore[attr
 
 # ── Common FEN extraction + validation helper ─────────────────────────────────
 
-def _extract_fen(data: dict | None) -> tuple[str, Response | None]:
+def _extract_fen(data: dict | None) -> tuple[str, Response | tuple[Response, int] | None]:
     if not data or "fen" not in data:
         return "", (jsonify({"error": "Missing FEN in request body."}), 400)
     fen_raw = data["fen"]
@@ -1294,7 +1353,7 @@ def index() -> str:
 
 @app.route("/probe", methods=["POST"])
 @_probe_rate_limit
-def probe() -> Response:
+def probe() -> Response | tuple[Response, int]:
     body = request.get_json(silent=True)
     fen, err = _extract_fen(body)
     if err:
@@ -1363,7 +1422,7 @@ def _stream_error_payload(fen: str, exc: BaseException) -> dict:
 
 @app.route("/probe/stream", methods=["POST"])
 @_probe_rate_limit
-def probe_stream() -> Response:
+def probe_stream() -> Response | tuple[Response, int]:
     body = request.get_json(silent=True)
     fen, err = _extract_fen(body)
     if err:
@@ -1564,6 +1623,7 @@ def cache_stats() -> Response:
 
 
 @app.route("/admin/login", methods=["POST"])
+@_admin_login_rate_limit
 def admin_login() -> Response:
     if not cfg.admin_token:
         return jsonify({"error": "Admin panel disabled: ADMIN_TOKEN is not configured."}), 503
@@ -1624,8 +1684,33 @@ if __name__ == "__main__":
         # plays for the Flask dev server above — without it, a single
         # open /probe/stream connection could starve every other request
         # (see README.md "Running in production").
+        #
+        # trusted_proxy=* / trusted_proxy_count / trusted_proxy_headers:
+        # waitress parses X-Forwarded-For and X-Forwarded-Proto and
+        # rewrites REMOTE_ADDR / wsgi.url_scheme itself, *before* the
+        # request ever reaches the Flask app object -- so it sits in front
+        # of, and takes priority over, the ProxyFix layer wired onto
+        # app.wsgi_app above. Without this, waitress's default
+        # (trusted_proxy=None) strips both headers entirely as untrusted,
+        # silently discarding them before ProxyFix could ever see them --
+        # ProxyFix alone is not sufficient here. `"*"` trusts whichever
+        # peer connects, rather than one specific IP, because Render's
+        # edge/load-balancer's own address isn't a fixed, documented
+        # value; this is safe under the same assumption
+        # TRUSTED_PROXY_COUNT's docstring already states -- that nothing
+        # but that one proxy hop can reach this process directly. Skipped
+        # entirely when cfg.trusted_proxy_count is 0 (no reverse proxy in
+        # front at all), leaving waitress's own default in place.
         log.info(
             "Starting waitress production server on %s:%s (threads=%s)",
             cfg.host, cfg.port, cfg.waitress_threads,
         )
-        waitress_serve(app, host=cfg.host, port=cfg.port, threads=cfg.waitress_threads)
+        waitress_kwargs = {}
+        if cfg.trusted_proxy_count > 0:
+            waitress_kwargs.update(
+                trusted_proxy="*",
+                trusted_proxy_count=cfg.trusted_proxy_count,
+                trusted_proxy_headers={"x-forwarded-for", "x-forwarded-proto"},
+            )
+        waitress_serve(
+            app, host=cfg.host, port=cfg.port, threads=cfg.waitress_threads, **waitress_kwargs)

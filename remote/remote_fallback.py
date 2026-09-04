@@ -140,6 +140,48 @@ class _RemoteDiskCache:
         self._lock = threading.Lock()
         self._entry_locks: dict[str, threading.Lock] = {}
         self._meta_lock = threading.Lock()
+        # Guards the install-and-record tail of _ensure_cached() below
+        # (the os.replace() + record() that actually mutates `root`'s
+        # contents and this cache's bookkeeping together) against
+        # clear()'s rmtree/recreate running at the same moment. A
+        # per-entry lock (see lock_for()) already serializes concurrent
+        # downloads of the *same* rel_path; this instead protects the
+        # publish step against a whole-cache clear(). Reentrant because
+        # clear() below nests other locks (_lock, _meta_lock) inside it.
+        self.lifecycle_lock = threading.RLock()
+        # Counts downloads that currently have an open, not-yet-published
+        # temp file on disk. clear() waits for this to hit zero before
+        # rmtree-ing `root` -- see begin_download()/end_download() and
+        # clear() below for why: unlike lifecycle_lock, which only needs
+        # to cover the brief publish step, a download's temp file is
+        # vulnerable for its *entire* (potentially slow) transfer, not
+        # just that tail. On POSIX, rmtree-ing a directory containing a
+        # file that's still open only unlinks its name -- the data stays
+        # readable/writable through the already-open descriptor -- but
+        # once that descriptor closes (as it does at the end of
+        # _ensure_cached()'s ``with open(tmp_path, "wb") as f:`` block,
+        # before publish), an unlinked file's data is actually freed, so
+        # the publish step's os.replace(tmp_path, ...) would fail with
+        # FileNotFoundError for a *source* path that no longer exists
+        # anywhere on disk. Deferring clear() instead of racing it avoids
+        # that outright, and -- unlike holding lifecycle_lock for the
+        # whole transfer -- doesn't serialize unrelated concurrent
+        # downloads against each other, only against clear() itself.
+        self._active_downloads = 0
+        self._no_active_downloads = threading.Condition(self.lifecycle_lock)
+
+    def begin_download(self) -> None:
+        """Mark one download as having an in-flight temp file. Must be
+        paired with a later :meth:`end_download`, typically via
+        ``try/finally``."""
+        with self.lifecycle_lock:
+            self._active_downloads += 1
+
+    def end_download(self) -> None:
+        with self.lifecycle_lock:
+            self._active_downloads -= 1
+            if self._active_downloads <= 0:
+                self._no_active_downloads.notify_all()
 
     def lock_for(self, rel_path: str) -> threading.Lock:
         lk = self._entry_locks.get(rel_path)
@@ -184,13 +226,16 @@ class _RemoteDiskCache:
                     pass
 
     def clear(self) -> None:
-        with self._lock:
-            self._sizes.clear()
-            self._cur_bytes = 0
-        with self._meta_lock:
-            self._entry_locks.clear()
-        shutil.rmtree(self.root, ignore_errors=True)
-        os.makedirs(self.root, exist_ok=True)
+        with self.lifecycle_lock:
+            while self._active_downloads > 0:
+                self._no_active_downloads.wait()
+            with self._lock:
+                self._sizes.clear()
+                self._cur_bytes = 0
+            with self._meta_lock:
+                self._entry_locks.clear()
+            shutil.rmtree(self.root, ignore_errors=True)
+            os.makedirs(self.root, exist_ok=True)
 
     def stats(self) -> dict:
         with self._lock:
@@ -257,27 +302,59 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
             if size is None:
                 return None
             local_path = self._disk_cache.local_path(rel_path)
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
             tmp_path = f"{local_path}.part"
+            # begin_download()/end_download() make a concurrent
+            # /admin/cache/clear() wait for this download rather than
+            # racing it -- see _RemoteDiskCache's docstring on
+            # _active_downloads for why racing it (rather than just
+            # deferring) isn't safe to do here. This does NOT serialize
+            # concurrent downloads of *different* tables against each
+            # other -- only clear() waits, not other downloads -- so
+            # probe concurrency (see config.py's PROBE_THREADS) is
+            # unaffected; the per-path lock_for(rel_path) above already
+            # prevents two threads from downloading the same rel_path at
+            # once, which is the actual duplicate-work hazard here.
+            self._disk_cache.begin_download()
             try:
-                with open(tmp_path, "wb") as f:
-                    offset = 0
-                    while offset < size:
-                        chunk = self._client.get_range(
-                            rel_path, offset, min(self._download_chunk, size - offset)
-                        )
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        offset += len(chunk)
-                os.replace(tmp_path, local_path)
-            except BaseException:
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-                raise
-            self._disk_cache.record(rel_path, size)
+                    with open(tmp_path, "wb") as f:
+                        offset = 0
+                        while offset < size:
+                            remaining = size - offset
+                            chunk = self._client.get_range(
+                                rel_path, offset, min(self._download_chunk, remaining)
+                            )
+                            if not chunk:
+                                raise remote_source.RemoteSourceError(
+                                    f"Incomplete download for {rel_path}: received "
+                                    f"{offset} of {size} bytes"
+                                )
+                            if len(chunk) > remaining:
+                                raise remote_source.RemoteSourceError(
+                                    f"Oversized range response for {rel_path}: "
+                                    f"{len(chunk)} bytes requested max {remaining}"
+                                )
+                            f.write(chunk)
+                            offset += len(chunk)
+                    # Publication -- the only part that actually needs
+                    # `root` to still exist and mean what it did when this
+                    # method started -- is what lifecycle_lock protects.
+                    # Only reached once the loop above has written exactly
+                    # `size` bytes -- an atomic rename protects
+                    # visibility, not content correctness, so a short
+                    # download must never reach this line.
+                    with self._disk_cache.lifecycle_lock:
+                        os.replace(tmp_path, local_path)
+                        self._disk_cache.record(rel_path, size)
+                except BaseException:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+            finally:
+                self._disk_cache.end_download()
             return local_path
 
     # --- lifecycle / admin surfaces (see app.py's clear_cache()/
@@ -287,7 +364,10 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
         try:
             super().close()
         finally:
-            shutil.rmtree(self._cache_root, ignore_errors=True)
+            try:
+                self._client.close()
+            finally:
+                shutil.rmtree(self._cache_root, ignore_errors=True)
 
     def clear_caches(self) -> None:
         """Drop the decoded-block cache and the on-disk downloaded-file

@@ -166,6 +166,10 @@ paths:
           description: Session started; response sets the admin session cookie
         "401":
           description: Incorrect token
+        "429":
+          description: >-
+            Rate limit exceeded (ADMIN_LOGIN_RATE_LIMIT, per client IP).
+            Retrying after a short wait should succeed.
         "503":
           description: Admin panel disabled (ADMIN_TOKEN not configured)
 

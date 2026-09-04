@@ -279,9 +279,13 @@ class _RemoteTablebase(chesstb.Tablebase):
             # in-flight probes and released every table's view -- probe()
             # registers as a reader around the whole walk, including
             # _open_any above, so no thread can be inside it once this
-            # runs.
-            self._page_cache.clear()
-            self._material_locks.clear()
+            # runs. Nested try/finally so the connection pool is still
+            # released even if clearing the cache/lock dicts raises.
+            try:
+                self._page_cache.clear()
+                self._material_locks.clear()
+            finally:
+                self._client.close()
 
     def clear_caches(self) -> None:
         """Drop decoded blocks and fetched pages, keeping open tables open

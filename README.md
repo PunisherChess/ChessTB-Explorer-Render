@@ -365,8 +365,11 @@ explaining what it does. The table below is the complete reference.
 | `REMOTE_TIMEOUT_SECS`       | `20`              | **Remote tablebase entries only.** Per-HTTP-request timeout for existence/size checks and the download itself. |
 | `REMOTE_MAX_RETRIES`        | `3`               | **Remote tablebase entries only.** Attempts for a single remote request before it's treated as failed. |
 | `PROBE_RATE_LIMIT`          | `"60 per minute"` | Per-client-IP request limit on `/probe` and `/probe/stream`, using [flask-limiter](https://flask-limiter.readthedocs.io/)'s string syntax. Left empty, rate limiting is disabled entirely. See [Security notes](#security-notes). |
+| `ADMIN_LOGIN_RATE_LIMIT`    | `"5 per minute"`  | Per-client-IP request limit on `/admin/login`, same string syntax as `PROBE_RATE_LIMIT`, applied independently of it. Covers both failed and successful login attempts. Left empty, login attempts are not rate limited. See [Security notes](#security-notes). |
+| `TRUSTED_PROXY_COUNT`       | `1` (also readable from a `TRUSTED_PROXY_COUNT` env var) | Number of trusted reverse-proxy hops in front of this app. In production this configures [waitress's own `trusted_proxy_count`](https://docs.pylonsproject.org/projects/waitress/en/stable/proxy-headers.html) (waitress parses `X-Forwarded-For`/`X-Forwarded-Proto` and corrects `REMOTE_ADDR`/`wsgi.url_scheme` itself, ahead of Flask); [Werkzeug's `ProxyFix`](https://werkzeug.palletsprojects.com/en/latest/middleware/proxy_fix/) makes the same correction for the `DEBUG = True` dev-server path, which doesn't run under waitress. Both rate limiters key on the corrected address, and `request.scheme`/`request.is_secure` read the corrected scheme. `1` matches this project's own `render.yaml` topology (Render's edge/load-balancer, once). Adjust to match your own reverse proxy chain, or set to `0` for a deployment with no reverse proxy in front of it at all. See [Security notes](#security-notes). |
 | `ADMIN_TOKEN`                | `""` (from `ADMIN_TOKEN` env var) | Shared secret required to reach `/admin` and `/admin/cache/*`. Read from the environment rather than hardcoded, so it can be set as a platform secret. Left unset, admin routes respond `503` rather than running unprotected. See [Security notes](#security-notes). |
 | `FLASK_SECRET_KEY`           | `""` (from `FLASK_SECRET_KEY` env var) | Key used to sign the admin session cookie. Read from the environment for the same reason as `ADMIN_TOKEN`. Left unset, a random key is generated at process startup instead, which just means every restart requires logging back in. |
+| `SESSION_COOKIE_SECURE`      | `False` (also readable from a `SESSION_COOKIE_SECURE` env var) | Whether the admin session cookie set by `/admin/login` requires HTTPS. Independent of `DEBUG` — the default matches this project's documented plain-HTTP local deployment; set the env var to `true` for any deployment the browser reaches over HTTPS (including behind a TLS-terminating reverse proxy such as Render's, which this project's own `render.yaml` already does). See [Security notes](#security-notes). |
 | `GITHUB_URL`                 | `""` (also readable from a `GITHUB_URL` env var) | Repository URL for the GitHub button shown in the header of every page. Edited directly like any other non-secret value here, or set as an env var on a given deployment. Left empty, the button is omitted. |
 
 Invalid values (wrong type, out of range) cause the app to log an error
@@ -408,6 +411,11 @@ python app.py
   for CSS/JS/piece images on first page load. It's independent of
   `PROBE_THREADS`, which sizes the thread pool used internally to
   parallelise tablebase probing rather than to serve HTTP requests.
+- `TRUSTED_PROXY_COUNT` (default `1`) configures waitress's own
+  `trusted_proxy_count`, so `request.remote_addr` and `request.scheme`
+  reflect the real client IP and scheme behind Render's edge/load-balancer
+  rather than that proxy's own address/hop — see
+  [Security notes](#security-notes).
 - Waitress handles `/probe/stream`'s streamed response natively; no
   additional configuration is needed for SSE to work correctly.
 - The probe endpoints are unauthenticated by design; only `/admin` and
@@ -476,6 +484,15 @@ everything by hand:
      don't survive a restart.
    - `GITHUB_URL` — optional; your repo's URL, if you want the header's
      GitHub button to appear.
+   - `SESSION_COOKIE_SECURE` — set to `true`. Render always terminates
+     TLS in front of the app, so the browser reaches it over HTTPS;
+     `config.py`'s own default targets this project's plain-HTTP local
+     deployment instead, so it needs to be set explicitly here (Option 1
+     above sets it automatically via `render.yaml`). Leaving it unset
+     doesn't fail closed — it makes `/admin/login` appear to succeed
+     while the browser silently drops the session cookie, so every
+     following `/admin/*` request comes back `401` (see
+     [Security notes](#security-notes)).
    - Leave `PORT` alone — Render sets it itself, and `config.py` already
      reads it (see [Configuration reference](#configuration-reference)).
 5. Under **Health Check Path**, set `/health` (matches the route in
@@ -619,28 +636,66 @@ curl -X POST http://127.0.0.1:7860/probe \
   core functionality. `/admin` and `/admin/cache/*` are gated behind
   `ADMIN_TOKEN` (see below); every other route requires no credential.
 - **Rate limiting** on `/probe` and `/probe/stream` is controlled by
-  `PROBE_RATE_LIMIT` (`config.py`'s "Rate limiting" section), applied
-  per client IP via [flask-limiter](https://flask-limiter.readthedocs.io/).
-  A client over the limit gets a `429` with a JSON error body. The
+  `PROBE_RATE_LIMIT`, and on `/admin/login` separately by
+  `ADMIN_LOGIN_RATE_LIMIT` (both in `config.py`'s "Rate limiting"
+  section), each applied per client IP via
+  [flask-limiter](https://flask-limiter.readthedocs.io/). A client over
+  either limit gets a `429` with a JSON error body. `PROBE_RATE_LIMIT`'s
   default, `"60 per minute"`, comfortably covers normal browsing and
   autoplay at its default delay — raise it if legitimate autoplay at a
   fast delay setting gets throttled, lower it if the deployment sees
-  abuse, or set it to `""` to disable rate limiting entirely. The
-  limiter's state lives in-process (`memory://`), which is sufficient
-  for a single-container deployment (e.g. one Render Web Service
-  instance) but isn't shared across multiple replicas.
+  abuse, or set either limit to `""` to disable it entirely.
+  `ADMIN_LOGIN_RATE_LIMIT` defaults to `"5 per minute"`, tight enough to
+  slow down repeated `ADMIN_TOKEN` guesses. Both limiters key on
+  `request.remote_addr` as corrected by `TRUSTED_PROXY_COUNT` (see
+  below) and their state lives in-process (`memory://`), which is
+  sufficient for a single-container deployment (e.g. one Render Web
+  Service instance) but isn't shared across multiple replicas.
+- **`TRUSTED_PROXY_COUNT`** (`config.py`'s "Rate limiting" section) is
+  what `request.remote_addr` — and therefore both rate limiters above —
+  is corrected against, so it reads the real client IP from
+  `X-Forwarded-For` rather than the address of whichever reverse proxy
+  sits in front of this app. The same setting also governs whether
+  `X-Forwarded-Proto` is trusted, correcting `request.scheme` /
+  `request.is_secure` (and any externally-generated URL) when TLS
+  terminates at that reverse proxy rather than at this app itself. In
+  production (`DEBUG = False`) this configures [waitress's own `trusted_proxy_count`](https://docs.pylonsproject.org/projects/waitress/en/stable/proxy-headers.html) —
+  waitress parses both headers and corrects `REMOTE_ADDR`/`wsgi.url_scheme`
+  itself, before Flask ever sees the request, so it takes priority here.
+  [Werkzeug's `ProxyFix`](https://werkzeug.palletsprojects.com/en/latest/middleware/proxy_fix/)
+  makes the equivalent correction for the `DEBUG = True` Flask-dev-server
+  path, which doesn't run under waitress at all. Defaults to `1`,
+  matching this project's own `render.yaml` topology; set it to match
+  your own deployment if that differs, or to `0` for a deployment with no
+  reverse proxy in front of it at all.
 - **Admin access** is controlled by `ADMIN_TOKEN` (`config.py`'s "Admin"
   section), read from the environment rather than hardcoded — set it as
   a platform secret (e.g. a Render environment variable, generated
   automatically by `render.yaml`'s `generateValue: true`) rather than
   committing it. Visiting `/admin` with no active session shows a login
   form; a correct token there starts a signed, `HttpOnly`,
-  `SameSite=Lax` session cookie (`Secure` too, whenever `DEBUG = False`).
-  API clients can instead send `Authorization: Bearer <ADMIN_TOKEN>`
-  directly, no session needed. Token comparison uses
-  `hmac.compare_digest` (constant-time, resistant to timing attacks).
-  Leaving `ADMIN_TOKEN` unset does **not** open the admin panel to
-  everyone — every admin route responds `503` instead.
+  `SameSite=Lax` session cookie (`Secure` too, on a deployment that sets
+  `SESSION_COOKIE_SECURE` — see below). API clients can instead send
+  `Authorization: Bearer <ADMIN_TOKEN>` directly, no session needed.
+  Token comparison uses `hmac.compare_digest` (constant-time, resistant
+  to timing attacks). Leaving `ADMIN_TOKEN` unset does **not** open the
+  admin panel to everyone — every admin route responds `503` instead.
+- **`SESSION_COOKIE_SECURE`** (`config.py`'s "Admin" section, also
+  readable from a `SESSION_COOKIE_SECURE` env var) controls whether the
+  admin session cookie above requires HTTPS, independently of `DEBUG` —
+  `DEBUG` is a development/runtime behavior switch, not a reliable
+  indicator of the deployment's transport security, so `DEBUG = False`
+  alone doesn't imply HTTPS is actually in front of this app. Defaults to
+  `False`, matching this project's documented plain-HTTP local
+  deployment. Set the env var to `true` for any deployment the browser
+  reaches over HTTPS (including behind a TLS-terminating reverse proxy —
+  the browser's own connection is what the `Secure` attribute governs,
+  not the internal hop between the proxy and this process); this
+  project's own `render.yaml` already does that for a Render deployment.
+  Leaving it `False` on an HTTP deployment is what makes `/admin/login`
+  work at all — a `Secure` cookie set over plain HTTP is simply dropped
+  by the browser, so `/admin/login` would appear to succeed while every
+  subsequent authenticated `/admin/*` request came back `401`.
 - The app serves via **waitress**, a production-grade WSGI server, by
   default (`DEBUG = False` in `config.py`) — see [Running in production](#running-in-production).
   Only set `DEBUG = True` (which switches to Flask's own dev server) for

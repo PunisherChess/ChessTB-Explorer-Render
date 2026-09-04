@@ -11,8 +11,7 @@ Every file in this repository not listed in the tables below — including
 `app.py`, `config.py`, `tablebase_router.py`, `static/js/*.js`,
 `static/css/*.css`, `templates/*.html`, `remote/`, `Dockerfile`,
 `render.yaml`, `.dockerignore`, `requirements.txt`, and `openapi.yaml`
-— is original and licensed under the terms in [`LICENSE`](LICENSE)
-(`GPL-3.0-or-later`).
+— is original and licensed under the terms in [`LICENSE`](LICENSE).
 
 ## Summary
 
@@ -32,17 +31,24 @@ Every file in this repository not listed in the tables below — including
 
 ## Notices
 
-This project is licensed as a whole under `GPL-3.0-or-later` — see
-[`LICENSE`](LICENSE).
+The following components carry conditions beyond a standard permissive
+license. Running the app privately, for yourself only, is unaffected by
+any of these — they apply once the app (or a copy of it) reaches
+another user, whether by distribution or network access.
 
-The following bundled components carry their own `GPL` license terms:
-
-- **`chess` / `chess.chesstb`** (`GPL-3.0-or-later`) — imported
-  directly by `app.py`.
+- **`chess` / `chess.chesstb`** (`GPL-3.0-or-later`) — `app.py` imports
+  this package directly. Under the FSF's interpretation of the GPL,
+  distributing a program that directly imports a GPL-licensed library
+  generally makes the combined work a derivative that must itself be
+  distributed under GPL-3.0 terms.
 - **Chessground** (`GPL-3.0-or-later`) — bundled in `static/vendor/`
-  and served to every client.
-- **cburnett piece set** (`GPL-2.0-or-later`) — bundled in
-  `static/pieces/cburnett/` and served to every client.
+  and served to every client. Per the [Chessground
+  license](https://github.com/lichess-org/chessground/blob/v10.1.1/LICENSE),
+  a website using it must make the combined client-served work
+  available under the GPL. This condition is triggered by serving the
+  app to any user other than yourself — including a locally hosted
+  instance reachable by others over a network — not only by
+  distributing server source code.
 
 ## Frontend libraries — `static/vendor/`
 

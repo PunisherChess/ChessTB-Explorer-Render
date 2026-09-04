@@ -113,6 +113,12 @@ DEFAULT_POOL_MAXSIZE = 20
 #: see :func:`_retry_delay`.
 _MAX_RETRY_DELAY = 4.0
 
+#: Status codes worth backing off before retrying: 429 (rate limited) and
+#: the transient gateway/server errors a CDN edge or origin can return
+#: under load. 404 and other 4xx codes are not included -- those mean the
+#: request itself won't succeed on retry, so there's nothing to wait for.
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
 
 def looks_like_remote(directory: str) -> bool:
     """True if `directory` (the value the app would otherwise treat as a
@@ -196,7 +202,13 @@ class _PageCacheShard:
                 ev_key, ev_size = self._lru.popitem(last=False)
                 self._data.pop(ev_key, None)
                 self.cur_bytes -= ev_size
-                self._page_locks.pop(ev_key, None)
+                # _page_locks is intentionally left alone here: it's
+                # created/read under _meta_lock (see lock_for()), not
+                # _lock, so evicting from it here raced a lock's identity
+                # against a concurrent lock_for() call for the same key.
+                # Page-lock objects are tiny next to cached page bytes, so
+                # the registry is left to grow as a stable set of locks
+                # rather than being pruned in step with cache eviction.
 
     def clear(self) -> None:
         with self._lock:
@@ -311,6 +323,11 @@ class RemoteHTTPClient:
             self._requests += 1
             self._bytes_fetched += nbytes
 
+    def close(self) -> None:
+        """Release the session's connection pool. Safe to call more than
+        once -- ``requests.Session.close()`` itself is idempotent."""
+        self._session.close()
+
     def stats(self) -> Dict[str, int]:
         """Total HTTP requests issued and response bytes received through
         this client so far."""
@@ -325,40 +342,62 @@ class RemoteHTTPClient:
 
         Tries a plain HEAD first; falls back to a 1-byte ranged GET (whose
         ``Content-Range`` header also carries the total size) for servers
-        that answer HEAD inconsistently for range-servable objects.
+        that answer HEAD inconsistently for range-servable objects. Each
+        attempt tries HEAD-then-ranged-GET as one unit, retried with the
+        same backoff policy as get_range()/get_first_page(), so a
+        transient failure during size discovery doesn't skip the retry
+        budget those two already get.
         """
         url = self.url_for(path)
-        try:
-            resp = self._session.head(url, timeout=self.timeout, allow_redirects=True)
-        except requests.RequestException:
-            resp = None  # fall through to the ranged-GET probe below
-        if resp is not None:
-            self._record()  # HEAD has no body -- nothing to add to bytes_fetched
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self._session.head(url, timeout=self.timeout, allow_redirects=True)
+            except requests.RequestException:
+                resp = None  # fall through to the ranged-GET probe below
+            if resp is not None:
+                self._record()  # HEAD has no body -- nothing to add to bytes_fetched
+                if resp.status_code == 404:
+                    return None
+                if resp.status_code < 400:
+                    cl = resp.headers.get("Content-Length")
+                    if cl is not None and cl.isdigit():
+                        return int(cl)
+
+            try:
+                resp = self._session.get(url, headers={"Range": "bytes=0-0"}, timeout=self.timeout)
+            except requests.RequestException as exc:
+                self._record()
+                last_exc = RemoteSourceError(f"Failed to reach {url}: {exc}")
+                last_exc.__cause__ = exc
+                if attempt + 1 < self.max_retries:
+                    time.sleep(_retry_delay(attempt, None))
+                continue
+            self._record(len(resp.content))
             if resp.status_code == 404:
                 return None
-            if resp.status_code < 400:
-                cl = resp.headers.get("Content-Length")
-                if cl is not None and cl.isdigit():
-                    return int(cl)
-
-        try:
-            resp = self._session.get(url, headers={"Range": "bytes=0-0"}, timeout=self.timeout)
-        except requests.RequestException as exc:
-            self._record()
-            raise RemoteSourceError(f"Failed to reach {url}: {exc}") from exc
-        self._record(len(resp.content))
-        if resp.status_code == 404:
-            return None
-        if resp.status_code == 206:
-            content_range = resp.headers.get("Content-Range", "")
-            total = content_range.rsplit("/", 1)[-1] if "/" in content_range else ""
-            if total.isdigit():
-                return int(total)
-        if resp.status_code == 200:
-            # Server ignored Range and returned the whole object -- only
-            # sane for a tiny/placeholder file, so this is safe to keep.
-            return len(resp.content)
-        raise RemoteSourceError(f"Unexpected status {resp.status_code} probing {url}")
+            if resp.status_code == 206:
+                content_range = resp.headers.get("Content-Range", "")
+                total = content_range.rsplit("/", 1)[-1] if "/" in content_range else ""
+                if total.isdigit():
+                    return int(total)
+                # Unknown ("*") or unparsable total -- this method IS the
+                # size-of-last-resort probe (see get_first_page()'s copy
+                # of this same situation, which falls back to this
+                # method), so there's nowhere further to fall back to.
+                last_exc = RemoteSourceError(
+                    f"{url} returned 206 with an unparsable Content-Range total: {content_range!r}"
+                )
+            elif resp.status_code == 200:
+                # Server ignored Range and returned the whole object --
+                # only sane for a tiny/placeholder file, so this is safe
+                # to keep.
+                return len(resp.content)
+            else:
+                last_exc = RemoteSourceError(f"Unexpected status {resp.status_code} probing {url}")
+                if resp.status_code in _RETRYABLE_STATUS_CODES and attempt + 1 < self.max_retries:
+                    time.sleep(_retry_delay(attempt, resp))
+        raise last_exc or RemoteSourceError(f"Failed to probe size for {url}")
 
     def get_range(self, path: str, offset: int, length: int) -> bytes:
         if length <= 0:
@@ -373,7 +412,14 @@ class RemoteHTTPClient:
                 )
             except requests.RequestException as exc:
                 self._record()
-                last_exc = exc
+                # Normalised to RemoteSourceError immediately (rather than
+                # storing the raw requests exception) so every caller up
+                # the stack -- CompositeTablebase.probe()'s fallback walk,
+                # the Flask routes' 502 mapping -- only ever has to catch
+                # one exception family for a transport failure, the same
+                # one already used for a bad HTTP status below.
+                last_exc = RemoteSourceError(f"Failed to reach {url}: {exc}")
+                last_exc.__cause__ = exc
                 if attempt + 1 < self.max_retries:
                     time.sleep(_retry_delay(attempt, None))
                 continue
@@ -389,7 +435,7 @@ class RemoteHTTPClient:
             last_exc = RemoteSourceError(
                 f"Unexpected status {resp.status_code} fetching {url} bytes={offset}-{end}"
             )
-            if resp.status_code in (429, 503) and attempt + 1 < self.max_retries:
+            if resp.status_code in _RETRYABLE_STATUS_CODES and attempt + 1 < self.max_retries:
                 time.sleep(_retry_delay(attempt, resp))
         raise last_exc or RemoteSourceError(f"Failed to fetch {url} bytes={offset}-{end}")
 
@@ -419,7 +465,10 @@ class RemoteHTTPClient:
                 )
             except requests.RequestException as exc:
                 self._record()
-                last_exc = exc
+                # See get_range()'s copy of this handler for why this is
+                # normalised to RemoteSourceError immediately.
+                last_exc = RemoteSourceError(f"Failed to reach {url}: {exc}")
+                last_exc.__cause__ = exc
                 if attempt + 1 < self.max_retries:
                     time.sleep(_retry_delay(attempt, None))
                 continue
@@ -428,13 +477,32 @@ class RemoteHTTPClient:
                 return None, b""
             if resp.status_code == 206:
                 content_range = resp.headers.get("Content-Range", "")
-                total = content_range.rsplit("/", 1)[-1] if "/" in content_range else ""
-                return (int(total) if total.isdigit() else None), resp.content[:page_size]
+                total_str = content_range.rsplit("/", 1)[-1] if "/" in content_range else ""
+                if total_str.isdigit():
+                    return int(total_str), resp.content[:page_size]
+                # Content-Range's total is "*" (RFC 9110 permits this when
+                # the sender doesn't know the complete representation
+                # length yet) or otherwise unparsable -- either way this
+                # means "exists, size unknown from this response", not
+                # "doesn't exist" (404 already returned above for that).
+                # Caching that distinction matters: the caller
+                # (_remote_size() in remote_direct.py) stores whatever
+                # this returns and, if it were None, would permanently
+                # treat an existing table as missing. head_size() is a
+                # separate probe that a server unable to state the range
+                # total inline may still be able to answer.
+                total = self.head_size(path)
+                if total is None:
+                    raise RemoteSourceError(
+                        f"{url} returned 206 with Content-Range {content_range!r} and "
+                        f"a follow-up size probe found nothing at that path"
+                    )
+                return total, resp.content[:page_size]
             if resp.status_code == 200:
                 # Range not honoured -- whole object came back from byte 0.
                 return len(resp.content), resp.content[:page_size]
             last_exc = RemoteSourceError(f"Unexpected status {resp.status_code} probing {url}")
-            if resp.status_code in (429, 503) and attempt + 1 < self.max_retries:
+            if resp.status_code in _RETRYABLE_STATUS_CODES and attempt + 1 < self.max_retries:
                 time.sleep(_retry_delay(attempt, resp))
         raise last_exc or RemoteSourceError(f"Failed to fetch {url} bytes=0-{page_size - 1}")
 
@@ -491,11 +559,40 @@ class RemoteFile:
         cur_offset = offset
         for page_index in range(first_page, last_page + 1):
             page = self._get_page(page_index)
-            start_in_page = cur_offset - page_index * self.page_size
-            take = min(len(page) - start_in_page, remaining)
-            parts.append(page[start_in_page:start_in_page + take])
-            cur_offset += take
-            remaining -= take
+            page_start = page_index * self.page_size
+            # The file's own last page is legitimately shorter than
+            # page_size whenever self.size isn't a multiple of it --
+            # that's normal, not truncation. expected_page_len is what
+            # THIS page should be regardless, so it's still page_size for
+            # every non-final page.
+            expected_page_len = min(self.page_size, self.size - page_start)
+            start_in_page = cur_offset - page_start
+            # max(0, ...): a page shorter than its own expected_page_len
+            # (a truncated remote response) would otherwise make
+            # len(page) - start_in_page negative -- Python accepts a
+            # negative slice bound rather than raising, so without this
+            # guard `take` would go negative and cur_offset/remaining
+            # would move backward/grow instead of making forward
+            # progress.
+            take = max(0, min(len(page) - start_in_page, remaining))
+            if take > 0:
+                parts.append(page[start_in_page:start_in_page + take])
+                cur_offset += take
+                remaining -= take
+            if len(page) < expected_page_len:
+                # This page came back shorter than ITS OWN expected
+                # length -- not just take == 0 above, which only catches
+                # the case where this page had nothing left to give at
+                # cur_offset's position. A short (but nonempty) page
+                # still needs to stop the read here: every later
+                # iteration's start_in_page assumes cur_offset has
+                # advanced exactly page_size per prior page, which a
+                # short page breaks -- continuing would compute a
+                # negative (and silently wrong-but-not-erroring, per the
+                # same slicing behavior above) start_in_page against the
+                # next page. Ending the read here instead mirrors this
+                # method's own documented past-EOF slicing behavior.
+                break
         return b"".join(parts)
 
     def close(self) -> None:
