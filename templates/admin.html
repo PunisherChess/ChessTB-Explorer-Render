@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChessTB — Admin Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body class="admin-page">
+
+{% if not authenticated %}
+<!-- Shown when GET /admin has no valid session cookie. Submits the token
+     to POST /admin/login (static/js/admin.js's login()); on success the
+     page reloads and this branch renders the dashboard instead. -->
+<div class="login-card">
+  <h1>
+    ♟ ChessTB Admin
+    {% if github_url %}
+    <a href="{{ github_url }}" class="site-header__link site-header__link--icon"
+       title="GitHub repository" aria-label="GitHub repository" target="_blank" rel="noopener">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795
+              8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41
+              -.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08
+              1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925
+              0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27
+              1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12
+              3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81
+              2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63
+              -5.37-12-12-12Z"/>
+      </svg>
+    </a>
+    {% endif %}
+  </h1>
+  {% if not admin_configured %}
+  <p class="status err">Admin panel disabled: ADMIN_TOKEN is not configured.</p>
+  {% else %}
+  <p class="login-card__hint">Enter the admin token to continue.</p>
+  <input type="password" id="login-token-input" class="login-input"
+         placeholder="Admin token" autocomplete="current-password">
+  <button class="btn btn--apply" id="login-btn">Log in</button>
+  <div class="status" id="login-status"></div>
+  {% endif %}
+  <a href="/" class="login-card__back">← Back to explorer</a>
+</div>
+{% else %}
+<h1>
+  ♟ ChessTB Cache Dashboard
+  {% if github_url %}
+  <a href="{{ github_url }}" class="site-header__link site-header__link--icon"
+     title="GitHub repository" aria-label="GitHub repository" target="_blank" rel="noopener">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795
+            8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41
+            -.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08
+            1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925
+            0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27
+            1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12
+            3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81
+            2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63
+            -5.37-12-12-12Z"/>
+    </svg>
+  </a>
+  {% endif %}
+  <button class="btn" id="logout-btn">Log out</button>
+  <a href="/" class="admin-page__back-link">← Back to explorer</a>
+</h1>
+
+<div class="toolbar-row">
+  <button class="btn" id="refresh-btn">Refresh</button>
+  <button class="btn danger" id="clear-btn">Clear all caches</button>
+</div>
+
+<div class="refresh-row">
+  <span id="next-refresh">Auto-refreshes every 5 s</span>
+  <span id="last-updated"></span>
+</div>
+
+<div class="grid">
+  <div class="card" id="card-eval">
+    <h2>Root Probe Cache (evaluate_fen)</h2>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-eval" style="width:0%"></div></div>
+    <div id="stats-eval"><div class="stat"><span class="label">Loading…</span></div></div>
+  </div>
+  <div class="card" id="card-probe">
+    <h2>Child Probe Cache (_probe_fen)</h2>
+    <div class="bar-wrap"><div class="bar-fill" id="bar-probe" style="width:0%"></div></div>
+    <div id="stats-probe"><div class="stat"><span class="label">Loading…</span></div></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>Thread Pool &amp; Configuration</h2>
+  <div id="stats-pool"><div class="stat"><span class="label">Loading…</span></div></div>
+</div>
+
+<div class="status" id="status-msg"></div>
+{% endif %}
+
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>
