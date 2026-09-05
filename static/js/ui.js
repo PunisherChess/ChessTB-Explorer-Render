@@ -879,12 +879,15 @@ const UI = (() => {
             try { replay.load(startFen); } catch (_) { replay.reset(); }
         }
         _pgnSnapshots = [{ label: 'Start', fen: replay.fen() }];
-        history.forEach((move, idx) => {
+        const { turn, fullmove } = _parseFenMeta(startFen);
+        let moveNum = fullmove;
+        let isWhite = turn === 'w';
+        history.forEach((move) => {
             replay.move(move.san);
-            const moveNum  = Math.floor(idx / 2) + 1;
-            const isWhite  = idx % 2 === 0;
-            const label    = isWhite ? `${moveNum}. ${move.san}` : `${moveNum}… ${move.san}`;
+            const label = isWhite ? `${moveNum}. ${move.san}` : `${moveNum}… ${move.san}`;
             _pgnSnapshots.push({ label, fen: replay.fen() });
+            if (!isWhite) moveNum++;
+            isWhite = !isWhite;
         });
         _renderPgnMoveList();
     }
