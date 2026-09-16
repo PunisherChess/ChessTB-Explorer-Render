@@ -90,7 +90,12 @@
     // a given display regardless of how much screen real estate the
     // browser window currently occupies. Don't switch this to
     // innerWidth/innerHeight without re-confirming that requirement.
-    var raw = Math.min(window.screen.width / BASELINE_W, window.screen.height / BASELINE_H);
+    var screenScale = Math.min(window.screen.width / BASELINE_W, window.screen.height / BASELINE_H);
+    // Clamp to what the *current* window can actually show, so the UI
+    // never renders larger than what actually fits — e.g. a split-screen
+    // or otherwise non-maximized window on a high-res display.
+    var fitScale = Math.min(window.innerWidth / BASELINE_W, window.innerHeight / BASELINE_H);
+    var raw = Math.min(screenScale, fitScale);
     var scale = Math.max(raw, FLOOR_SCALE);   // floor at 1280x720; no ceiling
     document.documentElement.style.fontSize = (16 * scale) + 'px';
   }
