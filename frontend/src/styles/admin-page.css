@@ -1,0 +1,158 @@
+/* ── Admin page ────────────────────────────────────────────────────────
+   The dashboard is an ordinary scrolling document. Selectors are scoped
+   under `.admin-page` on the page's <body>. */
+
+body.admin-page {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+    padding: var(--space-6);
+}
+
+.admin-page h1 {
+    font-size: var(--text-xl);
+    color: var(--text);
+    margin-bottom: var(--space-5);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+/* Colour and hover come from the global `a` rule in base.css. Targeted by
+   class rather than `h1 a` because h1 may also hold the GitHub icon
+   button (site-header__link--icon). */
+.admin-page__back-link { font-size: var(--text-sm); margin-left: auto; }
+
+/* Card-section labels, sized to match the app's other panel-title rows
+   (`.pgn-panel-title`, `.panel-header__title`) rather than a one-off
+   value. */
+.admin-page h2 {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-3);
+}
+
+.admin-page .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+/* Same background/border/radius recipe as `.pgn-panel` / `.results-panel`. */
+.admin-page .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 20px;
+}
+
+.admin-page .stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-sm);
+}
+.admin-page .stat:last-child { border-bottom: none; }
+.admin-page .stat .label { color: var(--text-dim); }
+.admin-page .stat .value {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+}
+
+.admin-page .bar-wrap {
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: var(--space-2) 0 var(--space-3);
+}
+/* Same gradient as the results panel's `.probe-progress__fill`. */
+.admin-page .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--progress-from), var(--progress-to));
+    border-radius: 4px;
+    transition: width 0.4s;
+}
+
+.admin-page .toolbar-row {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: 20px;
+}
+
+/* Destructive-action modifier for the shared `.btn` component (the
+   Refresh button next to it needs no modifier - plain `.btn` already
+   matches). Follows the same pattern as `.btn--apply`'s gold accent,
+   using the `--loss-glow` token for the hover fill. */
+.admin-page .btn.danger { border-color: var(--loss); color: var(--loss); }
+.admin-page .btn.danger:hover { background: var(--loss-glow); border-color: var(--loss); }
+
+.admin-page .status {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-top: 10px;
+    min-height: 18px;
+}
+.admin-page .status.ok  { color: var(--win); }
+.admin-page .status.err { color: var(--loss); }
+
+.admin-page .refresh-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: 20px;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+/* Login card for GET /admin without a valid session. Centered fixed-width
+   panel; reuses `.card`'s background, border and radius. */
+.admin-page .login-card {
+    max-width: 320px;
+    margin: 15vh auto 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 28px;
+    text-align: center;
+}
+.admin-page .login-card h1 { justify-content: center; margin-bottom: var(--space-2); }
+.admin-page .login-card__hint {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-bottom: var(--space-4);
+}
+.admin-page .login-card__back { display: block; margin-top: var(--space-4); font-size: var(--text-sm); }
+
+/* Same recipe as FenBar.jsx's `.fen-input`, minus the icon padding;
+   this field has no leading icon. */
+.admin-page .login-input {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    margin-bottom: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    outline: none;
+    text-align: center;
+    transition: border-color var(--tr), box-shadow var(--tr);
+}
+.admin-page .login-input:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 2px var(--gold-glow); }
+
+@media (max-width: 640px) {
+    .admin-page .grid { grid-template-columns: 1fr; }
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+@media (hover: none) and (pointer: coarse) {
+    .admin-page .login-input { font-size: var(--text-lg); }
+}

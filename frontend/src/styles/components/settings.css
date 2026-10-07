@@ -1,0 +1,272 @@
+/* ── Settings panel ─────────────────────────────────────────────────── */
+/* Dropdown anchored under the header, flush with the right edge.
+   top: --header-h. z-index sits above page content and the
+   toast layer's stacking context but below the promotion/PGN dialogs. */
+.settings-panel {
+    display: none;
+    position: fixed;
+    top: var(--header-h);
+    right: 0;
+    width: 18.75rem;
+    max-height: calc(100vh - var(--header-h));
+    max-height: calc(100dvh - var(--header-h));
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-right: none;
+    border-radius: 0 0 0 var(--r-lg);
+    box-shadow: var(--shadow-panel);
+    z-index: 150;
+    color: var(--text);
+}
+.settings-panel.is-open { display: block; }
+
+.settings-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.625rem 0.625rem var(--space-4);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.settings-panel__title {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+}
+
+.settings-row { border-bottom: 1px solid var(--border); }
+.settings-row:last-child { border-bottom: none; }
+
+/* ── Settings toggle rows (Show Root Row, Chess960 Mode) ──────────────
+   A label + slider switch. Reuses .settings-row for the shared
+   border-bottom/last-child treatment. */
+.settings-row--toggle { padding: var(--space-3) 0.875rem var(--space-3) var(--space-4); }
+.settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    cursor: pointer;
+    user-select: none;
+}
+.settings-toggle__label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Tiny pill/slider switch - track + circular knob, knob travels via
+   transform on :checked. Sized to sit comfortably in the settings panel
+   row alongside its label. */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 2.125rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+}
+.toggle-switch__input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+.toggle-switch__track {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-3);
+    border: 1px solid var(--border-2);
+    border-radius: 999px;
+    transition: background var(--tr), border-color var(--tr);
+    pointer-events: none;
+}
+.toggle-switch__track::before {
+    content: '';
+    position: absolute;
+    top: 0.0625rem;
+    left: 0.0625rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform var(--tr), background var(--tr);
+}
+.toggle-switch__input:checked + .toggle-switch__track {
+    background: var(--gold-glow);
+    border-color: var(--gold-dim);
+}
+.toggle-switch__input:checked + .toggle-switch__track::before {
+    transform: translateX(0.875rem);
+    background: var(--gold);
+}
+.toggle-switch__input:focus-visible + .toggle-switch__track {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+
+/* ── Settings slider row (Autoplay Delay) ─────────────────────────────
+   Same standalone-row treatment as the toggle row above (label + control,
+   no header/body/chevron), but laid out as a single line: label on the
+   left, the range input filling the middle, and the current value on the
+   right - matching the row height every other settings row uses. The
+   tick labels are positioned out of normal flow beneath the track (see
+   .range-slider__ticks below) so the row centers the label against the
+   track's own box, not against a taller track-plus-ticks cluster. */
+.settings-row--slider {
+    padding: 0.8125rem 0.875rem 0.8125rem var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+.settings-slider__label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text);
+    flex-shrink: 0;
+}
+.settings-slider__control {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.settings-slider__value {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    font-weight: 500;
+    color: var(--gold);
+    flex-shrink: 0;
+}
+
+/* Continuous range input - track and thumb restyled to match the toggle
+   switch's gold-on-dark language. min/max/step (0–2500ms, step 50ms) give
+   a fine-grained continuous feel; SettingsPanel.jsx reads/writes the
+   millisecond value directly (see AUTO_PLAY_DELAY_* in useExplorer.js).
+   The track's filled portion is driven by the --range-fill custom
+   property (a percentage), which SettingsPanel.jsx derives from the
+   current value - custom properties inherit into
+   pseudo-elements, so setting it on the input itself reaches the
+   vendor-prefixed track pseudo-elements below. The thumb is a target/
+   bullseye mark rather than a flat dot: background and border are both
+   --gold, then an inset box-shadow the same width as the border paints a
+   --surface ring between them - matching the settings panel's own
+   background so the ring reads as a gap punched through the gold rather
+   than a separately-colored layer - leaving a small solid --gold center. */
+.range-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 1rem;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+}
+.range-slider::-webkit-slider-runnable-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: linear-gradient(to right,
+        var(--gold) var(--range-fill, 0%), var(--surface-3) var(--range-fill, 0%));
+    border: 1px solid var(--border-2);
+}
+.range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    margin-top: -0.3125rem;
+    border-radius: 50%;
+    background: var(--gold);
+    border: 3px solid var(--gold);
+    box-shadow: inset 0 0 0 3px var(--surface);
+    transition: border-color var(--tr);
+}
+.range-slider::-moz-range-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: linear-gradient(to right,
+        var(--gold) var(--range-fill, 0%), var(--surface-3) var(--range-fill, 0%));
+    border: 1px solid var(--border-2);
+}
+.range-slider::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: var(--gold);
+    border: 3px solid var(--gold);
+    box-shadow: inset 0 0 0 3px var(--surface);
+    transition: border-color var(--tr);
+}
+.range-slider:hover::-webkit-slider-thumb,
+.range-slider:hover::-moz-range-thumb { border-color: var(--gold-dim); }
+.range-slider:focus-visible { outline: none; }
+.range-slider:focus-visible::-webkit-slider-thumb {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+.range-slider:focus-visible::-moz-range-thumb {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+
+/* Each zero-width label is centered on the bar's start, midpoint or end. */
+.range-slider__ticks {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.0625rem;
+}
+.range-slider__ticks span {
+    display: flex;
+    justify-content: center;
+    width: 0;
+    font-size: 0.5rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+    .settings-panel { width: min(280px, calc(100vw - 24px)); }
+}
+
+/* ── Keyboard shortcuts list ───────────────────────────────────────── */
+.settings-row--shortcuts { padding: var(--space-3) var(--space-4); }
+.settings-shortcuts__title {
+    display: block;
+    margin-bottom: var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text);
+}
+.settings-shortcuts__list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(3, auto);
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+}
+kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0.0625rem var(--space-1);
+    font-family: var(--font-ui); font-size: 0.6875rem; font-weight: 600;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 0.1875rem;
+    letter-spacing: 0.02em; line-height: 1.6;
+}
+@media (hover: none) {
+    .settings-row--shortcuts { display: none; }
+}

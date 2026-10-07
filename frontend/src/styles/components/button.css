@@ -1,0 +1,49 @@
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn {
+    height: var(--control-h);
+    padding: 0 var(--space-3);
+    border-radius: var(--r-md);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+    transition: background var(--tr), border-color var(--tr), color var(--tr);
+    flex-shrink: 0;
+    user-select: none;
+}
+.btn:hover:not(:disabled):not(.is-autoplay-disabled) {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+    color: var(--text);
+}
+.btn:active:not(:disabled):not(.is-autoplay-disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
+
+.btn__icon { width: 0.75rem; height: 0.75rem; opacity: 0.75; }
+
+/* Apply button - gold accent */
+.btn--apply { border-color: var(--gold-dim); color: var(--gold); }
+.btn--apply:hover { background: var(--gold-glow); border-color: var(--gold); }
+.btn--apply .btn__icon { opacity: 1; }
+
+/* Grow buttons fill available space equally */
+.btn--grow        { flex: 1 0 0; justify-content: center; padding: 0 0.375rem; }
+/* Icon-only buttons don't grow */
+.btn--icon-only   { flex: 0 0 auto; padding: 0 var(--space-2); }
+
+/* Auto-play active state */
+.btn.is-playing { color: var(--amber); border-color: var(--amber); }
+
+.btn--compact {
+    height: var(--control-h-sm);
+    padding: 0 var(--space-2);
+    font-size: var(--text-xs);
+    flex-shrink: 0;
+}

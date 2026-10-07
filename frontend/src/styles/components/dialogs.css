@@ -1,0 +1,120 @@
+/* ── Promotion dialog ───────────────────────────────────────────────── */
+.promotion-dialog {
+    display: none;
+    position: fixed; inset: 0;
+    background: var(--scrim);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+}
+.promotion-dialog.is-visible { display: flex; }
+.promotion-tray {
+    background: var(--surface-3);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    padding: 1.125rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.875rem;
+    box-shadow: var(--shadow);
+}
+.promotion-tray__title {
+    font-size: var(--text-xs); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-muted);
+    user-select: none;
+}
+.promotion-tray__pieces { display: flex; gap: var(--space-2); }
+.promotion-piece-btn {
+    width: 3.75rem; height: 3.75rem;
+    background: var(--tray-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    cursor: pointer; padding: 0.375rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--tr), border-color var(--tr), transform var(--tr);
+}
+.promotion-piece-btn:hover        { background: var(--tray-bg-dark); border-color: var(--gold-dim); }
+.promotion-piece-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.promotion-piece-btn:active       { transform: scale(0.94); }
+.promotion-piece-btn img {
+    width: 2.75rem; height: 2.75rem;
+    object-fit: contain;
+    pointer-events: none; user-select: none;
+}
+@media (prefers-reduced-motion: reduce) { .promotion-piece-btn { transition: none; } }
+
+/* ── PGN import dialog ──────────────────────────────────────────────── */
+.pgn-dialog {
+    display: none;
+    position: fixed; inset: 0;
+    background: var(--scrim);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-5);
+}
+.pgn-dialog.is-open { display: flex; }
+.pgn-dialog__inner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow);
+    width: 100%; max-width: 35rem;
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+}
+.pgn-dialog__header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.875rem 1.125rem 0.625rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.pgn-dialog__title { font-size: var(--text-sm); font-weight: 600; }
+.pgn-dialog__close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: var(--text-lg); line-height: 1; padding: 0.1875rem 0.4375rem;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--tr), color var(--tr);
+}
+.pgn-dialog__close:hover { background: var(--surface-2); color: var(--text); }
+.pgn-dialog__textarea {
+    flex-shrink: 0;
+    margin: var(--space-3) 1.125rem 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs); line-height: 1.5;
+    padding: var(--space-2) 0.625rem;
+    resize: vertical; outline: none;
+    transition: border-color var(--tr);
+}
+.pgn-dialog__textarea:focus { border-color: var(--border-2); }
+.pgn-dialog__error { font-size: var(--text-xs); color: var(--loss); padding: var(--space-1) 1.125rem 0; min-height: 1.125rem; }
+.pgn-dialog__inner > .btn {
+    align-self: flex-start;
+    margin: var(--space-2) 1.125rem;
+}
+.pgn-dialog__moves {
+    flex: 1; overflow-y: auto;
+    padding: var(--space-1) 1.125rem var(--space-4);
+    display: flex; flex-wrap: wrap;
+    gap: 0.1875rem 0.375rem;
+    align-content: flex-start;
+}
+.pgn-move-btn {
+    background: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-dim);
+    font-size: var(--text-xs); font-family: var(--font-mono);
+    padding: 0.1875rem 0.4375rem;
+    cursor: pointer;
+    transition: background var(--tr), color var(--tr);
+}
+.pgn-move-btn:hover { background: var(--border); color: var(--text); }

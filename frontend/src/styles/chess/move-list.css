@@ -1,0 +1,166 @@
+/* ── Move-line history (inside PGN panel) ─────────────────────────────
+   A 3-column grid - rank, White move, Black move - matching the rank
+   styling, rank/move separator, row separator, and move font of the
+   tablebase results table (.moves-table). Each full move is one grid
+   row: .move-line__row uses `grid-template-columns: subgrid` so its own
+   three children (the rank label plus the White/Black move cells) line
+   up in the parent .move-line grid's tracks while the row itself still
+   gets a real box - needed for its own border-bottom, since a border
+   has to be painted on something. A line that opens or closes on a
+   single colour (a custom starting FEN, the last move being White's
+   with no reply yet, or a move that had a variation - see
+   .move-line__variation below) leaves the other cell of that row empty.
+   The rank column is --pgn-rank-w, close to 1.5x the results table's
+   rank column; the remaining space is split evenly between the White
+   and Black columns. */
+.move-line {
+    --pgn-rank-width: var(--pgn-rank-w);
+    display: grid;
+    grid-template-columns: var(--pgn-rank-width) 1fr 1fr;
+    align-items: center;
+    font-size: var(--text-xs);
+    padding: 0;
+}
+/* No row-gap: the border-bottom below is the only separation between
+   rows, the same flush rhythm .moves-table gets from border-collapse;
+   a gap on top of a border would read as a different, wider spacing
+   than the results table's. */
+.move-line__row {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+}
+.move-line__empty {
+    grid-column: 1 / -1;
+    margin-top: 3rem;   /* matches .moves-empty-state's own top padding */
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-style: italic;
+}
+.move-line__num {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-align: center;
+    padding: var(--space-1) 0;
+    user-select: none;
+}
+.move-line__cell {
+    position: relative;
+    min-width: 0;
+    padding: var(--space-1) var(--space-3);
+}
+/* Visible separator between the rank column and the White-move column,
+   matching the border between the Rank and DTZ Move columns in
+   .moves-table. Drawn as an unrounded pseudo-element rather than a
+   border on the White cell itself: that cell also has a border-radius
+   for its own hover/current-state background (below), and a straight
+   border on a rounded box gets rounded off with it, curving the
+   separator's own ends. No separator between the White and Black
+   columns, matching the borderless boundary between a Move column and
+   its own Score column in .moves-table. */
+.move-line__cell--white::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 1px;
+    background: var(--border-2);
+    pointer-events: none;
+}
+/* A main-line cell always holds exactly one move, so the whole cell is
+   the hover/click target - matching a cell in .moves-table - and never
+   both the White and Black cell of a row at once, since each only
+   responds to its own hover/click. A cell left empty, or holding the
+   PGN ellipsis placeholder rather than an actual move (see
+   buildMainLine() in moveLine.js), opts out - see .move-line__cell--empty. */
+.move-line__cell:not(.move-line__cell--empty) {
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--tr), box-shadow var(--tr);
+}
+.move-line__cell:not(.move-line__cell--empty):hover {
+    background: var(--surface-2);
+}
+.move-line__cell:not(.move-line__cell--empty).is-current {
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--border);
+}
+.move-line__cell:not(.move-line__cell--empty).is-current .move-line__move {
+    color: var(--text);
+    font-weight: 600;
+}
+/* The PGN ellipsis placeholder in a row that opens on Black (see
+   buildMainLine() in moveLine.js) - muted like the rank label, since it's a
+   typographic stand-in rather than a move. */
+.move-line__cell--placeholder {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+.move-line__move {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    padding: 0;
+}
+/* Variations (alternate moves reached by navigating back and playing
+   something different): each one is its own paragraph spanning the
+   full grid width, indented under the move it branches from rather
+   than packed into that move's own cell, in a smaller/dimmer font. A
+   variation whose own move also has alternatives interrupts its
+   paragraph for a nested, more deeply indented one, then resumes in a
+   fresh paragraph at its own indent, so nesting reads as a tree.
+   Bordered on its own bottom edge like a main-line row, for the same
+   flush, borders-only row rhythm - but never the Rank/White vertical
+   separator above, since a variation paragraph has no
+   .move-line__cell--white of its own. */
+.move-line__variation {
+    grid-column: 1 / -1;
+    padding: var(--space-1) var(--space-3) var(--space-1) 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+}
+.move-line__num--inline {
+    margin-right: 0.1875rem;
+}
+/* A variation paragraph holds more than one move, so - unlike a
+   main-line cell - each move is its own hover/click target: a tight
+   chip around just that move's text. */
+.move-line__move--chip {
+    color: inherit;
+    font-size: inherit;
+    font-weight: 500;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    padding: 0.0625rem var(--space-1);
+    margin-right: 0.125rem;
+    transition: background var(--tr), color var(--tr);
+    cursor: pointer;
+}
+.move-line__move--chip:hover { background: var(--surface-2); color: var(--text); }
+.move-line__move--chip.is-current {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* ── PGN panel ──────────────────────────────────────────────────────── */
+.pgn-moves-scroll {
+    flex: 1;
+    min-height: 12rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* No top/left/right padding: the first move row sits directly on the
+       header boundary and the rank column starts at the panel's content
+       edge. .move-line__cell supplies the White/Black text inset. */
+    padding: 0 0 var(--space-4);
+}

@@ -1,0 +1,88 @@
+/* ── Large-screen scaling (explorer page, >1180px) ──────────────────────
+   Root font size is 100% up to a 1536x780 window and rises to at most
+   125% (20px), following the window's vw/vh; the smaller term applies:
+     width term :  13px + 0.1953vw   (16px @1536, 18px @2560, 20px @3584)
+     height term:  12.55px + 0.442vh (16px @780, 18.3px @1300)
+   --board-size fills the window height up to --board-size-max. Scoped to
+   html.explorer (set in templates/index.html and frontend/index.html); the
+   px-based admin page keeps the 16px baseline. At <=1180px both keep their
+   base values. */
+@media (min-width: 1181px) {
+    html.explorer {
+        font-size: clamp(100%, min(81.25% + 0.1953vw, 78.5% + 0.442vh), 125%);
+    }
+    :root {
+        /* Widest the three-column row may grow. */
+        --content-max: 112rem;
+
+        /* Height budget: 100vh minus header 3rem, content padding 2.25rem,
+           FEN bar/error/turn rows ~8.9rem, tray borders (0.625rem
+           + 4px) and ~1rem slack for a wrapped error message = 15.75rem + 4px.
+           The remainder holds the board and its two trays: 1.25 x board.
+           Update when the height above the board changes. */
+        --board-fit-h: calc((100vh - 15.75rem - 4px) / 1.25);
+
+        /* Width budget: padding 4rem + gaps 3rem + PGN column 12.5rem +
+           results table 40rem minimum = 59.5rem. */
+        --board-fit-w: calc(min(100vw, var(--content-max)) - 59.5rem);
+
+        /* Floor 20.5rem (328px at a 16px root, a multiple of 8px); the page
+           scrolls below it. The floor must stay above the FEN toolbar's
+           minimum content width (321px at a 16px root: four labelled
+           buttons, Back, Next and five gaps), otherwise Next sticks out
+           past the Lock button's right edge. Re-check it when a toolbar
+           button or its padding changes. --board-size-max caps the result,
+           and the results column takes the width the board column does not
+           use. */
+        --board-size: min(var(--board-size-max), max(20.5rem, min(var(--board-fit-h), var(--board-fit-w))));
+    }
+    /* The results and PGN columns take the row height set by the board
+       column and scroll their content internally. */
+    .right-col, .pgn-col { contain: size; }
+
+    /* Rounds down to a multiple of 8px so each square is a whole number
+       of pixels. */
+    @supports (width: round(down, 100.7px, 8px)) {
+        :root {
+            --board-size: round(down, min(var(--board-size-max), max(20.5rem, min(var(--board-fit-h), var(--board-fit-w)))), 8px);
+        }
+    }
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+:root { --pgn-col-w: 12.5rem; }
+
+.content {
+    display: grid;
+    grid-template-columns: var(--board-size) minmax(21.25rem, 1fr) var(--pgn-col-w);
+    gap: var(--space-5);
+    padding: 1.125rem var(--space-6);
+    min-height: calc(100vh - var(--header-h));
+    min-height: calc(100dvh - var(--header-h));
+    max-width: var(--content-max, 96.25rem);
+    margin: 0 auto;
+    overflow: visible;
+}
+
+/* ── Left column ────────────────────────────────────────────────────── */
+.left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5625rem;
+    min-height: 26rem;
+}
+
+/* ── Right column ───────────────────────────────────────────────────── */
+.right-col {
+    min-width: 0;
+    min-height: 22rem;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── PGN column ─────────────────────────────────────────────────────── */
+.pgn-col {
+    min-height: 22rem;
+    display: flex;
+    flex-direction: column;
+}

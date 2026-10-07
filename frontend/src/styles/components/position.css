@@ -1,0 +1,146 @@
+/* ── FEN block ──────────────────────────────────────────────────────── */
+.fen-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+.fen-input-wrap {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--fen-row-gap);
+}
+.fen-input-wrap__label {
+    position: absolute;
+    left: 0.625rem; top: 50%;
+    transform: translateY(-50%);
+    font-size: var(--text-xs); font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--text-muted);
+    pointer-events: none; user-select: none; z-index: 1;
+}
+.fen-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    height: var(--control-h);
+    padding: 0 0.625rem 0 2.75rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    outline: none;
+    letter-spacing: 0.02em;
+    transition: border-color var(--tr), box-shadow var(--tr);
+}
+.fen-input:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 2px var(--gold-glow); }
+.fen-input::placeholder { color: var(--text-muted); font-size: var(--text-xs); }
+.fen-input.is-invalid {
+    border-color: var(--loss) !important;
+    box-shadow: 0 0 0 2px rgba(248,113,113,0.15) !important;
+}
+
+.fen-actions {
+    display: flex;
+    gap: var(--fen-row-gap);
+    flex-wrap: nowrap;
+}
+
+/* Lock button - sits beside the FEN input, height matched to it. Width comes
+   from the FEN-row rule below. .lock-icon is drawn in a 0.6875rem layout box
+   and scaled up to its 0.875rem appearance at paint time. .is-locked uses
+   the same gold border/background as other active controls. */
+.btn--lock {
+    height: var(--control-h);
+}
+
+/* Lock, Back and Next share one fixed width from --fen-icon-btn-w,
+   independent of icon size and padding. Scoped to the FEN row; other
+   icon-only buttons size from their own padding. */
+.fen-input-wrap > .btn--lock,
+.fen-actions > .btn--icon-only {
+    flex: 0 0 var(--fen-icon-btn-w);
+    width: var(--fen-icon-btn-w);
+    padding: 0;
+    justify-content: center;
+}
+.btn--lock .lock-icon {
+    width: 0.6875rem;
+    height: 0.6875rem;
+    transform: scale(1.2727);
+}
+.btn--lock.is-locked {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: var(--gold-glow);
+}
+.btn--lock.is-locked:hover:not(.is-autoplay-disabled) { background: var(--gold-glow); border-color: var(--gold); }
+.btn--lock.is-locked .btn__icon { opacity: 1; }
+/* Soft-disabled during an auto-play run - see lockAutoplayDisabled in
+   FenBar.jsx. Uses a class/aria-disabled rather than the native disabled
+   attribute so the button stays hoverable. */
+.btn--lock.is-autoplay-disabled { opacity: 0.38; cursor: not-allowed; }
+/* Two icons are always present; CSS toggles which is visible via .is-locked. */
+.lock-icon--unlocked { display: block; }
+.lock-icon--locked   { display: none; }
+.btn--lock.is-locked .lock-icon--unlocked { display: none; }
+.btn--lock.is-locked .lock-icon--locked   { display: block; }
+
+/* Spare-piece trays - dimmed while locked. Kept clickable (not
+   pointer-events:none) so they still show a not-allowed cursor; the
+   actual placement is refused at the source in board.js. */
+.spare-tray.is-locked { opacity: 0.35; }
+.spare-tray.is-locked .spare-piece { cursor: not-allowed; }
+
+/* ── Error / coverage line ──────────────────────────────────────────── */
+.error-line {
+    min-height: 0.875rem;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--loss);
+    padding-left: 0.125rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3125rem;
+    line-height: 1.4;
+}
+.error-line:empty { visibility: hidden; }
+.error-line.is-coverage-error { color: var(--amber); }
+
+/* ── Turn toggle ────────────────────────────────────────────────────── */
+.turn-row { display: flex; gap: 0.3125rem; }
+.turn-btn {
+    flex: 1;
+    height: var(--control-h);
+    display: flex; align-items: center; justify-content: center; gap: 0.375rem;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: var(--text-xs); font-weight: 600;
+    font-family: var(--font-ui);
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background var(--tr), border-color var(--tr), color var(--tr);
+    user-select: none;
+}
+.turn-btn:hover { background: var(--surface-3); border-color: var(--border-2); color: var(--text); }
+.turn-btn:active { transform: scale(0.97); }
+.turn-pip {
+    width: 0.5rem; height: 0.5rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background var(--tr), box-shadow var(--tr);
+}
+.turn-pip--w { background: var(--board-light); border: 1.5px solid var(--board-dark); }
+.turn-pip--b { background: var(--pip-black-bg); border: 1.5px solid var(--pip-black-border); }
+.turn-btn.is-active {
+    background: var(--turn-active-bg);
+    border-color: var(--gold-dim);
+    color: var(--gold);
+}
+.turn-btn.is-active .turn-pip--w { box-shadow: 0 0 5px color-mix(in srgb, var(--board-light) 50%, transparent); }
+.turn-btn.is-active .turn-pip--b { border-color: var(--text-dim); }

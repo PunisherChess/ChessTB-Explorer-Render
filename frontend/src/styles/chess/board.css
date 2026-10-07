@@ -1,0 +1,246 @@
+/* ── Board group ────────────────────────────────────────────────────── */
+/* The side-to-move toggle and the board form one element, as wide as the
+   board. Free vertical space in the left column opens above the group. */
+.board-group {
+    margin-top: auto;
+    width: var(--board-size);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+/* ── Board wrap ─────────────────────────────────────────────────────── */
+.board-wrap {
+    border-radius: var(--r-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-board);
+    width: var(--board-size);
+    flex-shrink: 0;
+}
+.board-wrap-inner {
+    position: relative;
+    width: var(--board-size);
+    display: flex;
+    flex-direction: column;
+}
+/* Set by board.js's _syncTrayOrientation() to mirror chessground's own
+   orientation. column-reverse visually swaps the black/white trays around
+   #board without moving them in the DOM. */
+.board-wrap-inner.orientation-black {
+    flex-direction: column-reverse;
+}
+
+/* ── Chessground sizing ─────────────────────────────────────────────── */
+/* Chessground's own CSS (chessground.base.css) sizes cg-wrap/cg-board/
+   piece/square as percentages of their container. #board is the
+   percentage-sizing root; height is set explicitly here since chessground
+   doesn't compute it from width in JS. Both dimensions come from the
+   shared --board-size custom property (see tokens.css), so the board resizes
+   together with .left-col/.board-wrap/.board-wrap-inner/.spare-tray
+   without drifting out of alignment with them.
+
+   Chessground has its own rounding step one DOM layer deeper: render.ts's
+   updateBounds() reads #board's rendered width, then deliberately snaps
+   cg-container's width down to a whole number of device pixels evenly
+   divisible by 8 (so all 8 squares render crisply, with no anti-aliased
+   sub-pixel square boundaries),
+   `Math.floor((bounds.width * devicePixelRatio) / 8) * 8 / devicePixelRatio`,
+   and sets that as an inline style on cg-container. At integer device
+   pixel ratios (1x, 2x) this is a no-op whenever #board's current rendered
+   width happens to divide evenly by 8, but at fractional ratios (1.5x is
+   common on Windows displays) it usually doesn't: at --board-size's
+   ceiling (31.5rem = 504px), 504 * 1.5 = 756, 756 / 8 = 94.5,
+   floor'd to 94 * 8 = 752, back to 752 / 1.5 ≈ 501.3px - about 2.7px short
+   of #board's actual width on the right/bottom edge. Squares/pieces are
+   plain CSS percentages with no JS-computed inline style of their own, so
+   pinning cg-container's own width and height with !important (overriding
+   chessground's inline style) to the same --board-size as #board is
+   enough to keep the whole board exact and stable regardless of device
+   pixel ratio or the current viewport size. */
+#board {
+    width: var(--board-size);
+    height: var(--board-size);
+}
+cg-container, cg-board {
+    width: var(--board-size) !important;
+    height: var(--board-size) !important;
+}
+
+/* ── Board square colours - Lichess brown ───────────────────────────── */
+/* Fallback board colours. theme.js overrides these values after the board
+   is initialized, while the defaults prevent an unthemed initial render. */
+cg-board {
+    background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyJyBoZWlnaHQ9JzInPgo8cmVjdCB3aWR0aD0nMScgaGVpZ2h0PScxJyBmaWxsPScjZjBkOWI1Jy8+CjxyZWN0IHg9JzEnIHdpZHRoPScxJyBoZWlnaHQ9JzEnIGZpbGw9JyNiNTg4NjMnLz4KPHJlY3QgeT0nMScgd2lkdGg9JzEnIGhlaWdodD0nMScgZmlsbD0nI2I1ODg2MycvPgo8cmVjdCB4PScxJyB5PScxJyB3aWR0aD0nMScgaGVpZ2h0PScxJyBmaWxsPScjZjBkOWI1Jy8+Cjwvc3ZnPg==");
+    /* The SVG above is a 2x2 tile (2 squares per axis). 25% 25% sizes it
+       to 2/8 of the board per axis, so the tile repeats 4x4
+       (background-repeat's default) to fill all 64 squares. */
+    background-size: 25% 25%;
+}
+/* ── Rank/file coordinate labels - inset onto board edges ─────────── */
+/* board.js sets coordinatesOnSquares: false, which uses chessground's
+   native coords.ranks/coords.files strips - one rank-only label per row,
+   one file-only label per column - rather than a combined "a8"-style
+   label rendered on all 64 squares. Chessground positions these outside
+   the board by default (which .board-wrap's overflow:hidden would clip
+   anyway), so they're repositioned here to sit inset at the board's own
+   edges, at a small (0.125rem) corner inset.
+
+   Colour is not done via renderCoords()'s own .coord-light/.coord-dark
+   classes (chessground's source, wrap.ts): those classes don't
+   correspond to the actual square each label overlays once repositioned
+   this way, and chessground's own official theme CSS
+   (chessground.brown.css) doesn't use them for coords.ranks/coords.files
+   either - it uses structural :nth-child selectors scoped by an
+   .orientation-white/.orientation-black class on the wrap element
+   instead (that class exists for lichess's own outside-the-board label
+   rhythm, not square-accurate contrast, so its odd/even color pairing
+   isn't reusable here - only the selector structure is). ranks/files are fixed
+   DOM arrays ['1'..'8']/['a'..'h'] (types.ts), so :nth-child parity is
+   deterministic; the odd/even -> colour mapping below follows the board
+   square colours (a1 dark, a8 light, etc.) for each orientation rather than
+   chessground's coordinate colour convention. */
+.orientation-white coords.ranks coord:nth-child(odd),
+.orientation-white coords.files coord:nth-child(odd) {
+    color: var(--board-light) !important;   /* light text - these sit on dark squares */
+}
+.orientation-white coords.ranks coord:nth-child(even),
+.orientation-white coords.files coord:nth-child(even) {
+    color: var(--board-dark) !important;   /* dark text - these sit on light squares */
+}
+.orientation-black coords.ranks coord:nth-child(odd),
+.orientation-black coords.files coord:nth-child(odd) {
+    color: var(--board-dark) !important;   /* flipped board: parity-to-square-colour swaps */
+}
+.orientation-black coords.ranks coord:nth-child(even),
+.orientation-black coords.files coord:nth-child(even) {
+    color: var(--board-light) !important;
+}
+coords.ranks coord, coords.files coord {
+    font-size: max(0.5625rem, calc(var(--board-size) / 56)) !important;
+    font-weight: 600 !important;
+    font-family: var(--font-ui) !important;
+}
+.cg-wrap coords.ranks {
+    left: 0 !important;
+    top: 0 !important;
+    width: max(0.875rem, calc(var(--board-size) / 38)) !important;
+    height: 100% !important;
+    padding-left: 0.125rem !important;   /* safe on this axis: one 0.875rem-wide column, not tiled horizontally */
+    opacity: 1 !important;
+}
+.cg-wrap coords.ranks coord {
+    transform: none !important;
+    /* Chessground's own coord rule is `flex: 1 1 auto` - each cell's
+       basis comes from its own glyph's content width/height, so 8 cells
+       sharing the board's row/column don't land on exact one-square (1/8)
+       multiples; the shortfall accumulates top-to-bottom (or left-to-right
+       for files), and since labels are aligned within their own cell, that
+       accumulating error reads as the label drifting further from the
+       square's true edge the further along the row/column it is (barely
+       visible at '1'/'2', a couple of px off by '8'). flex:0 0 12.5% pins
+       every cell to exactly one square-width (12.5% of the board)
+       regardless of its glyph's own size, eliminating that drift.
+       The corner inset itself is deliberately per-cell padding (below),
+       not container padding: padding on the container would shrink the
+       width available for the 8 tiled cells, so flex:0 0 12.5% would land
+       on smaller, still-uneven cells instead of a true one-eighth each. */
+    flex: 0 0 12.5% !important;
+    padding-top: 0.125rem !important;
+}
+.cg-wrap coords.files {
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: max(0.875rem, calc(var(--board-size) / 38)) !important;
+    text-align: right !important;
+    text-transform: none !important;
+    /* align-items:flex-end, not padding-bottom on this container: files is
+       a row-direction flex container, so vertical is its cross axis, and
+       container padding on the cross axis doesn't push each cell's own
+       content toward the bottom the way main-axis padding does.
+       flex-end makes each cell
+       shrink-to-content and sit at the bottom of the row; the actual
+       corner inset is per-cell padding-bottom below, mirroring how
+       coords.ranks coord's padding-top is per-cell (its main axis, where
+       per-item padding works predictably). */
+    align-items: flex-end !important;
+    opacity: 1 !important;
+}
+.cg-wrap coords.files coord {
+    flex: 0 0 12.5% !important;   /* see the fuller comment on coords.ranks coord above */
+    padding-right: 0.125rem !important;
+    padding-bottom: 0.125rem !important;
+}
+
+/* ── Last-move highlight ──────────────────────────────────────────────── */
+cg-board square.last-move {
+    background-color: var(--board-highlight);
+}
+
+/* ── Check / checkmate halo ──────────────────────────────────────────── */
+cg-board square.check {
+    background-image: radial-gradient(
+        ellipse at center,
+        rgba(255, 0, 0, 0.90)   0%,
+        rgba(231, 0, 0, 0.70)  25%,
+        rgba(169, 0, 0, 0.00)  89%,
+        rgba(158, 0, 0, 0.00) 100%
+    );
+}
+
+/* ── Spare-piece trays ───────────────────────────────────────────── */
+.spare-tray {
+    background-color: var(--tray-bg);
+    border: none;
+    padding: 0.3125rem 0;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    width: var(--board-size);
+    box-sizing: border-box;
+}
+/* Each tray's border sits on whichever edge faces the board. By default
+   (white orientation) that's the black tray's bottom edge and the white
+   tray's top edge. .board-wrap-inner.orientation-black (set by board.js's
+   _syncTrayOrientation() to mirror chessground's orientation) reverses
+   the trays' stacking order via flex-direction: column-reverse, so the
+   rules below mirror which edge faces the board in that orientation. */
+.spare-tray--black { border-bottom: 2px solid var(--tray-border); }
+.spare-tray--white { border-top: 2px solid var(--tray-border); }
+.board-wrap-inner.orientation-black .spare-tray--black {
+    border-bottom: none;
+    border-top: 2px solid var(--tray-border);
+}
+.board-wrap-inner.orientation-black .spare-tray--white {
+    border-top: none;
+    border-bottom: 2px solid var(--tray-border);
+}
+.spare-piece {
+    width: var(--spare-size);
+    height: var(--spare-size);
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: none;
+    cursor: grab;
+}
+.spare-piece img {
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+.spare-piece.cp-selected {
+    outline: 2px solid var(--gold);
+    outline-offset: 1px;
+    border-radius: 0.125rem;
+}
+/* Crosshair cursor on the board while a spare piece is armed for placement */
+#board.cp-active { cursor: crosshair; }
+#board.cp-active square { cursor: crosshair; }
+
+/* Drag ghost and arrow overlay: no CSS needed here - both are native
+   chessground features (draggable.showGhost / drawable.autoShapes),
+   styled via chessground.base.css + the drawable.brushes config in
+   board.js. */

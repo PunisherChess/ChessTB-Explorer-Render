@@ -1,0 +1,25 @@
+/* ── Screen navigation (phone layout) ───────────────────────────────── */
+.screen-nav {
+    display: none;
+    grid-template-columns: repeat(3, 1fr);
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: var(--screen-nav-h);
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+}
+.screen-nav__item {
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font: 600 var(--text-xs) var(--font-ui);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transition: color var(--tr), box-shadow var(--tr);
+}
+.screen-nav__item[aria-current="page"] {
+    color: var(--gold);
+    box-shadow: inset 0 2px 0 var(--gold);
+}
