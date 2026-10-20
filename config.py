@@ -16,11 +16,11 @@ configuration file to serve multiple deployment platforms.
     platforms like Render assign the port dynamically per-deployment
     (via the platform's PORT variable) rather than using a fixed value;
     see the "Server" section below.
-  - TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING /
-    GITHUB_URL: read from the environment with a literal fallback,
-    to allow a deployment (for example, a Render Web Service) to select a
-    different tablebase location or repository URL without modifying the
-    source file; editing the literal value below remains supported.
+  - TABLEBASE_PATH / GITHUB_URL: read from the environment with a
+    literal fallback, to allow a deployment (for example, a Render Web
+    Service) to select a different tablebase location or repository URL
+    without modifying the source file; editing the literal value below
+    remains supported.
 
 Invalid values (wrong type, out of range) make the app log an error and
 exit at startup rather than run with a silently-wrong configuration;
@@ -31,54 +31,53 @@ import os
 
 # ── Tablebase location ──────────────────────────────────────────────────────
 
-# ChessTB tables are split three ways: TABLEBASE_PATH covers positions
-# with 6 or fewer men on the board, TABLEBASE_PATH_7_8 covers 7 and 8,
-# and TABLEBASE_PATH_CASTLING covers positions where a king or rook still
-# has a usable castling right, independently of piece count (chess.chesstb
-# names that table differently and never resolves such a position from
-# either of the other two, however many men are on the board). Every
-# probe is routed by inspecting the exact position being probed - a root
-# position and a child position one of its moves leads to (one piece
-# fewer after a capture, or with a castling right given up) can resolve
-# through a different path within the same request. See
-# tablebase_router.py's module docstring for the full design.
+def _tablebase_path_from_env(default: str) -> "str | list[str]":
+    """Returns TABLEBASE_PATH from the environment: one path, or a list for
+    comma-separated entries. Returns `default` when the variable is unset."""
+    value = os.environ.get("TABLEBASE_PATH")
+    if value is None:
+        return default
+    paths = [p.strip() for p in value.split(",") if p.strip()]
+    if not paths:
+        return ""
+    return paths[0] if len(paths) == 1 else paths
+
+
+# TABLEBASE_PATH locates the ChessTB tables for every position, whatever
+# its piece count or castling rights. Each material is looked up through
+# the entries in order, and a root position and the child positions it
+# depends on share that order. See tablebase_router.py's module docstring
+# for the full design.
 #
-# Each of the three settings accepts:
+# TABLEBASE_PATH accepts:
 #   - a local directory path         TABLEBASE_PATH = r"C:\chesstb\6men"
 #                                     TABLEBASE_PATH = "/data/chesstb/6men"
-#   - an http(s):// base URL         TABLEBASE_PATH = "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve/full"
+#   - an http(s):// base URL         TABLEBASE_PATH = "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve"
 #                                     (the bucket's /resolve path - see README.md)
 #   - a list mixing the two, tried left-to-right until one has the
 #     material being probed - a "hybrid" source, typically a local mirror
 #     of frequently probed materials backed by a remote URL for the rest:
-#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve/full"]
-#     (the environment-variable override below only ever supplies a
-#     single path - a hybrid list can only be set here, as a literal.)
+#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve"]
+#     (the environment variable supplies the same list as comma-separated
+#     entries: TABLEBASE_PATH=/data/chesstb/6men,https://example.org/tables)
 #
-# Only TABLEBASE_PATH is required. TABLEBASE_PATH_7_8 left empty routes
-# every non-castling position - 7 and 8 men included - through
-# TABLEBASE_PATH, matching a single combined directory or URL that
-# already covers up to 8 men. TABLEBASE_PATH_CASTLING left empty routes a
-# still-usable-castling-right position through TABLEBASE_PATH the same
-# way, rather than reporting it as not covered - most deployments never
-# need either override, since 7-8 man tables run into the terabytes and
-# castling rights are vanishingly rare in sub-9-man endgames.
+# A table set published under several paths (for example a separate
+# castling set) is covered by listing each path.
 #
-# Left empty too, the app still starts, but every /probe request will
-# fail and /health will report "degraded" until TABLEBASE_PATH is set.
+# Left empty, the app still starts, but every /probe request will fail
+# and /health will report "degraded" until TABLEBASE_PATH is set.
 #
-# All three are also readable from an environment variable of the same
-# name (falling back to the literal value below when unset). On Render,
-# the setting can be supplied from the service configuration without
-# modifying the source file. A tablebase set this large (the full ChessTB set runs
-# into the terabytes) is virtually always the remote/URL form in a PaaS
-# deployment: attaching that much persistent disk to a single web service
-# is both impractical and, at a platform's normal per-GB disk pricing,
-# far more expensive than serving it remotely and probing with
-# REMOTE_MODE = "direct" below, which stores nothing on disk at all.
-TABLEBASE_PATH          = os.environ.get("TABLEBASE_PATH", "")
-TABLEBASE_PATH_7_8      = os.environ.get("TABLEBASE_PATH_7_8", "")
-TABLEBASE_PATH_CASTLING = os.environ.get("TABLEBASE_PATH_CASTLING", "")
+# TABLEBASE_PATH is also readable from an environment variable of the
+# same name (falling back to the literal value passed below when unset). On
+# Render, the setting can be supplied from the service configuration
+# without modifying the source file. A tablebase set this large (the
+# full ChessTB set runs into the terabytes) is virtually always the
+# remote/URL form in a PaaS deployment: attaching that much persistent
+# disk to a single web service is both impractical and, at a platform's
+# normal per-GB disk pricing, far more expensive than serving it
+# remotely and probing with REMOTE_MODE = "direct" below, which stores
+# nothing on disk at all.
+TABLEBASE_PATH = _tablebase_path_from_env("")
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
@@ -164,9 +163,8 @@ BLOCK_CACHE_BYTES = 64 * 1024 * 1024
 
 # ── Remote (URL) tablebase entries only ─────────────────────────────────────
 # Everything below is ignored for a local-directory entry; it applies to
-# every http(s):// entry across TABLEBASE_PATH, TABLEBASE_PATH_7_8, and
-# TABLEBASE_PATH_CASTLING (including entries inside a hybrid list - see
-# above). See the module docstrings of remote/remote_direct.py and
+# every http(s):// entry in TABLEBASE_PATH (including entries inside a
+# hybrid list - see above). See the module docstrings of remote/remote_direct.py and
 # remote/remote_fallback.py for the full design.
 
 # How a remote table's bytes reach the prober:

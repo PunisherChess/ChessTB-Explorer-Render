@@ -59,8 +59,7 @@ paths:
         "503":
           description: >-
             Two distinct causes, both with this status code: (1) tablebase
-            not initialised (none of TABLEBASE_PATH, TABLEBASE_PATH_7_8,
-            or TABLEBASE_PATH_CASTLING opened successfully) - no
+            not initialised (TABLEBASE_PATH is unset or failed to open) - no
             error_code is set on the response body in this case; (2) an
             in-flight probe of this (variant, FEN) pair by another
             concurrent request didn't finish within PROBE_TIMEOUT_SECS
@@ -248,7 +247,7 @@ components:
             variant="chess960". Either way, a letter naming a right with
             no matching king and rook on the board is rejected with a 400
             response. A right that does have one is accepted and probed
-            (see TABLEBASE_PATH_CASTLING in the project README). A FEN
+            (see TABLEBASE_PATH in the project README). A FEN
             longer than 100 characters is rejected with a 400 response.
           example: "4k3/8/8/8/8/8/8/4K2R w - - 0 1"
         variant:
@@ -325,7 +324,12 @@ components:
 
     Summary:
       type: object
-      description: Outcome distribution across all legal moves
+      description: >-
+        Outcome distribution across all legal moves under the 50-move rule,
+        using each resulting position's halfmove clock. Outcomes use DTM50
+        when available, otherwise DTC. Clock-independent draws, cursed wins,
+        and blessed losses count as draws. A move whose clock-aware outcome
+        cannot be resolved counts as unknown, including failed child probes.
       properties:
         wins:    {type: integer}
         draws:   {type: integer}
@@ -483,7 +487,7 @@ components:
       type: object
       description: >-
         Point-in-time hit-rate counters for both in-process LRUs, plus the
-        static config and tablebase tier info they're sized against.
+        static config and tablebase info they're sized against.
       properties:
         evaluate_fen_cache:
           $ref: "#/components/schemas/CacheCounters"
@@ -497,11 +501,9 @@ components:
             block_cache_bytes: {type: integer}
         tablebase:
           type: object
-          description: Which of the three routing tiers are configured (see RoutedTablebase).
+          description: Whether the ordered source resolver is configured.
           properties:
-            low_configured: {type: boolean}
-            high_configured: {type: boolean}
-            castling_configured: {type: boolean}
+            configured: {type: boolean}
         thread_pool:
           type: object
           properties:
@@ -511,9 +513,9 @@ components:
         tablebase_cache:
           type: object
           description: >-
-            Per-tier cache statistics: router_block_cache plus one entry
-            for each configured tier (low, high, castling) that reports its
-            own. Omitted when nothing reports statistics.
+            Cache statistics: block_cache plus one entry named source
+            containing the resolver's own cache statistics. Omitted when
+            nothing reports statistics.
           additionalProperties: true
 
     CacheCounters:
@@ -542,7 +544,7 @@ components:
         tablebase_cache:
           type: object
           description: >-
-            Per-tier cache statistics: router_block_cache plus one entry
-            for each configured tier (low, high, castling) that reports its
-            own. Omitted when nothing reports statistics.
+            Cache statistics: block_cache plus one entry named source
+            containing the resolver's own cache statistics. Omitted when
+            nothing reports statistics.
           additionalProperties: true

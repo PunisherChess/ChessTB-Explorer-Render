@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import Icon from './ui/Icon.jsx';
 
 function Logo() {
@@ -13,7 +14,7 @@ function Logo() {
     );
 }
 
-export default function Header({ githubUrl, setSettingsOpen }) {
+function Header({ githubUrl, setSettingsOpen }) {
     return (
         <header className="site-header" role="banner">
             <Logo />
@@ -39,10 +40,12 @@ export default function Header({ githubUrl, setSettingsOpen }) {
                 </a>
                 <button id="settings-btn" className="site-header__link site-header__link--icon"
                         title="Board settings" aria-label="Open board settings"
-                        onClick={(e) => { e.stopPropagation(); setSettingsOpen(o => !o); }}>
+                        onClick={() => setSettingsOpen(o => !o)}>
                     <Icon name="settings" />
                 </button>
             </nav>
         </header>
     );
 }
+
+export default memo(Header);

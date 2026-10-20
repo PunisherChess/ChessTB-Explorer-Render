@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { parseFenMeta } from '../engine/pgnFormat.js';
 import { buildMoveListItems, buildVariation } from '../engine/moveLine.js';
 import { scrollIntoViewWithin } from '../engine/scroll.js';
@@ -50,9 +50,8 @@ function renderItems(items, nodes, rootChildren, currentId, onGoTo, keyPrefix) {
     });
 }
 
-export default function PgnPanel({ explorer }) {
-    const { moveHistory, startFen, historyInitialized, actions } = explorer;
-    const { nodes, rootChildren, currentId } = moveHistory;
+function PgnPanel({ moveHistory, startFen, historyInitialized, actions }) {
+    const { nodes, currentId } = moveHistory;
     const scrollRef = useRef(null);
 
     useEffect(() => {
@@ -61,32 +60,35 @@ export default function PgnPanel({ explorer }) {
         scrollIntoViewWithin(current, container);
     }, [currentId, nodes]);
 
-    let content = null;
-    if (!historyInitialized) {
-        content = null;   // no render until Board reports its first move-tree change
-    } else if (!rootChildren || rootChildren.length === 0) {
-        content = <span className="move-line__empty">No moves yet</span>;
-    } else {
+    // Memo key is `moveHistory`: the board passes a new object on every tree change.
+    const content = useMemo(() => {
+        if (!historyInitialized) return null;   // no render until Board reports its first move-tree change
+        const { nodes: treeNodes, rootChildren, currentId: current } = moveHistory;
+        if (!rootChildren || rootChildren.length === 0) {
+            return <span className="move-line__empty">No moves yet</span>;
+        }
         const { turn, fullmove } = parseFenMeta(startFen);
-        const items = buildMoveListItems(nodes, rootChildren, currentId, turn, fullmove);
-        content = renderItems(items, nodes, rootChildren, currentId, actions.goToNode, 'm');
-    }
+        const items = buildMoveListItems(treeNodes, rootChildren, current, turn, fullmove);
+        return renderItems(items, treeNodes, rootChildren, current, actions.goToNode, 'm');
+    }, [historyInitialized, moveHistory, startFen, actions]);
 
     return (
         <Panel
             className="pgn-panel" label="Game PGN" title="PGN"
             end={
                 <>
-                    <Button id="pgn-copy-btn" compact title="Copy PGN to clipboard" onClick={() => actions.copyPgnText()}>Copy</Button>
-                    <Button id="pgn-btn" compact icon="upload" title="Import PGN game" onClick={() => actions.openPgnDialog()}>Import</Button>
+                    <Button id="pgn-btn" compact iconOnly icon="fileIn" title="Import PGN game" aria-label="Import PGN game" onClick={actions.openPgnDialog} />
+                    <Button id="pgn-export-btn" compact iconOnly icon="fileOut" title="Export PGN game" aria-label="Export PGN game" onClick={actions.exportPgn} />
                 </>
             }
         >
             <div className="pgn-moves-scroll" role="region" aria-label="Move history" tabIndex={0} ref={scrollRef}>
-                <div id="move-line" className="move-line" role="list" aria-label="Played moves">
+                <div id="move-line" className="move-line" role="group" aria-label="Played moves">
                     {content}
                 </div>
             </div>
         </Panel>
     );
 }
+
+export default memo(PgnPanel);

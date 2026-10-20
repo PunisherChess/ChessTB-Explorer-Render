@@ -82,13 +82,14 @@ import { parseFen, makeFen }       from '../vendor/chessops/fen.js';
 import { chessgroundDests }        from '../vendor/chessops/compat.js';
 import { parseSan, makeSan }       from '../vendor/chessops/san.js';
 import { parseSquare, makeSquare } from '../vendor/chessops/util.js';
+import { VARIANTS, ROOT_ID, METRICS, STORAGE_KEYS } from './constants.js';
+import { childrenOf }  from './tree.js';
 
 // ── Variant ──────────────────────────────────────────────────────────────
-// The application's rules-mode state. Distinct from chessops's own `rules`
-// property (always 'chess' for both Standard and Chess960 - see the
-// module doc comment above): this is application metadata that travels
-// alongside the position, never derived from it.
-const VARIANTS = Object.freeze({ STANDARD: 'standard', CHESS960: 'chess960' });
+// The application's rules-mode state (VARIANTS, from constants.js). Distinct
+// from chessops's own `rules` property (always 'chess' for both Standard and
+// Chess960 - see the module doc comment above): this is application
+// metadata that travels alongside the position, never derived from it.
 
 const Board = (() => {
 
@@ -137,7 +138,7 @@ const Board = (() => {
     // setVariant() reset the tree.
     //
     // Each node is {id, san, fen, from, to, parentId, children, activeChild}.
-    // `id` is also the node's index in _nodes. parentId === ROOT (-1) means
+    // `id` is also the node's index in _nodes. parentId === ROOT_ID (-1) means
     // the node replies to the tree's start position (_startFen). `children`
     // lists every move tried from that node - children[0] renders as the
     // "main" continuation, children[1+] as parenthesised variations.
@@ -152,29 +153,28 @@ const Board = (() => {
     //
     // The PGN panel and PGN export walk this tree recursively so alternate
     // moves are preserved as variations instead of overwriting history.
-    const ROOT = -1;
-
     let _nodes           = [];   // [{id, san, fen, from, to, parentId, children:[], activeChild}]
     let _rootChildren    = [];   // ids of moves played directly from _startFen
     let _rootActiveChild = null;
-    let _currentId        = ROOT; // id of the node currently shown, or ROOT for _startFen itself
+    let _currentId        = ROOT_ID; // id of the node currently shown, or ROOT_ID for _startFen itself
     let _startFen         = null; // FEN the current tree began from (for PGN formatting)
 
-    function _childrenOf(id) { return id === ROOT ? _rootChildren : _nodes[id].children; }
-    function _activeChildOf(id) { return id === ROOT ? _rootActiveChild : _nodes[id].activeChild; }
+    function _childrenOf(id) { return childrenOf(_nodes, _rootChildren, id); }
+    function _activeChildOf(id) { return id === ROOT_ID ? _rootActiveChild : _nodes[id].activeChild; }
     function _setActiveChild(id, childId) {
-        if (id === ROOT) _rootActiveChild = childId;
+        if (id === ROOT_ID) _rootActiveChild = childId;
         else _nodes[id].activeChild = childId;
     }
 
-    function _resetMoveLine() {
+    // `emit: false` lets the caller emit the history after finishing its own state updates.
+    function _resetMoveLine({ emit = true } = {}) {
         _nodes            = [];
         _rootChildren     = [];
         _rootActiveChild  = null;
-        _currentId        = ROOT;
+        _currentId        = ROOT_ID;
         _future           = [];
         _startFen         = _position ? currentFen() : null;
-        if (_onMoveHistoryChange) _emitHistory();
+        if (emit) _emitHistory();
     }
 
     function _emitHistory() {
@@ -206,6 +206,35 @@ const Board = (() => {
         _setActiveChild(_currentId, childId);
         _currentId = childId;
         return childId;
+    }
+
+    // ── Commit helpers ───────────────────────────────────────────────────────
+    // Plays a legal `move`, records it in the move tree, and reports the new
+    // position immediately: a completed move is a single, definite change that
+    // needs no debounce.
+    function _commitPlayedMove(move, fromKey, toKey) {
+        const san = makeSan(_position, move);
+        _position.play(move);
+        _lastMoveKeys = [fromKey, toKey];
+        const fen = currentFen();
+        _addMove(san, fen, fromKey, toKey);
+        _emitHistory();
+        _syncChessground();
+        if (_onPositionChange) _onPositionChange(fen, true);
+    }
+
+    // Replaces the position outright: pushes `prevFen` (null for the first
+    // position) onto the undo stack, restarts the move tree, and drops any
+    // pending promotion.
+    function _commitReplacedPosition(newPosition, prevFen) {
+        _position = newPosition;
+        if (prevFen !== null) _pushHistory(prevFen);
+        _hidePromotionDialog();
+        _pendingPromotion = null;
+        _lastMoveKeys = undefined;
+        _resetMoveLine();
+        _syncChessground();
+        if (_onPositionChange) _onPositionChange(currentFen());
     }
 
     // ── Piece theme ───────────────────────────────────────────────────────────
@@ -469,17 +498,7 @@ const Board = (() => {
         _pendingPromotion = null;
         const move = { from: parseSquare(source), to: parseSquare(target), promotion: ROLE_OF[pieceLetter.toUpperCase()] };
         if (!_position.isLegal(move)) { _syncChessground(); return; }   // revert the visual pawn-on-back-rank relocation
-        const san = makeSan(_position, move);
-        _position.play(move);
-        _lastMoveKeys = [source, target];
-        _addMove(san, currentFen(), source, target);
-        _emitHistory();
-        _syncChessground();
-        // immediate=true: a completed promotion is a single, definite move
-        // (see playMove()'s own comment on this parameter), not part of a
-        // rapid-fire stream of changes the debounce below it is meant to
-        // guard against.
-        if (_onPositionChange) _onPositionChange(currentFen(), true);
+        _commitPlayedMove(move, source, target);
     }
 
     // ── Core sync algorithm ──────────────────────────────────────────────────
@@ -536,16 +555,7 @@ const Board = (() => {
                 }
             }
             if (_position.isLegal(move)) {
-                const san = makeSan(_position, move);
-                _position.play(move);
-                _lastMoveKeys = [origHint, destHint];
-                _addMove(san, currentFen(), origHint, destHint);
-                _emitHistory();
-                _syncChessground();
-                // immediate=true: see the comment on the equivalent call in
-                // _onPromotionSelect() above - a completed drag-and-drop
-                // move is a single, definite move too.
-                if (_onPositionChange) _onPositionChange(currentFen(), true);
+                _commitPlayedMove(move, origHint, destHint);
                 return;
             }
             // Not legal - fall through to the generic edit path below, which
@@ -561,12 +571,7 @@ const Board = (() => {
         const nextFen = `${cgPlacement} ${_turnChar(_position)} - - 0 1`;
         const built = _buildPosition(nextFen);
         if (!built.ok) { _syncChessground(); return; }   // invalid resulting position - snap back
-        _position = built.pos;
-        _pushHistory(prevFen);
-        _lastMoveKeys = undefined;
-        _resetMoveLine();
-        _syncChessground();
-        if (_onPositionChange) _onPositionChange(currentFen());
+        _commitReplacedPosition(built.pos, prevFen);
     }
 
     function _onCgSelect(key) {
@@ -597,12 +602,7 @@ const Board = (() => {
         if (nextFen === prevFen) return;   // identity placement (e.g. re-placing the same piece already there) - nothing to record
         const built = _buildPosition(nextFen);
         if (!built.ok) { setClickPlacePiece(null); return; }   // illegal result - refuse, board stays as it was
-        _position = built.pos;
-        _pushHistory(prevFen);
-        _lastMoveKeys = undefined;
-        _resetMoveLine();
-        _syncChessground();
-        if (_onPositionChange) _onPositionChange(currentFen());
+        _commitReplacedPosition(built.pos, prevFen);
     }
 
     // ── Best-move arrows (DTZ / DTC / DTM / DTM50) ────────────────────────────
@@ -615,7 +615,7 @@ const Board = (() => {
         if (!cg) return;
         if (!bestMoves) { cg.setAutoShapes([]); return; }
         const shapes = [];
-        ['dtz', 'dtc', 'dtm', 'dtm50'].forEach(metric => {
+        Object.keys(METRICS).forEach(metric => {
             const entry = bestMoves[metric];
             if (!entry) return;
             const move = parseSan(_position, entry.san);
@@ -700,11 +700,11 @@ const Board = (() => {
     // ── Public API ────────────────────────────────────────────────────────────
 
     function _restoredOrientation() {
-        return Storage.read('chesstb_orientation') === 'black' ? 'black' : 'white';
+        return Storage.read(STORAGE_KEYS.ORIENTATION) === 'black' ? 'black' : 'white';
     }
 
     function _restoredLocked() {
-        return Storage.read('chesstb_locked') === 'true';
+        return Storage.read(STORAGE_KEYS.LOCKED) === 'true';
     }
 
     // variant, if given, must be VARIANTS.STANDARD or VARIANTS.CHESS960 and
@@ -853,17 +853,7 @@ const Board = (() => {
         if (fen === prevFen) return { ok: true };
         const built = _buildPosition(fen);
         if (!built.ok) return { ok: false, reason: built.reason };
-        _position = built.pos;
-        if (prevFen !== null) _pushHistory(prevFen);
-        _hidePromotionDialog();
-        _pendingPromotion = null;
-        _lastMoveKeys = undefined;
-        _resetMoveLine();
-        _syncChessground();
-        // Position-change callback, as in playMove()/goBack()/goForward()/
-        // goToNode()/clear().
-        const nextFen = currentFen();
-        if (_onPositionChange) _onPositionChange(nextFen);
+        _commitReplacedPosition(built.pos, prevFen);
         return { ok: true };
     }
 
@@ -882,14 +872,7 @@ const Board = (() => {
         const built = _buildPosition(fen, next);
         if (!built.ok) return { ok: false, reason: built.reason };
         _variant = next;
-        _position = built.pos;
-        if (prevFen !== null) _pushHistory(prevFen);
-        _hidePromotionDialog();
-        _pendingPromotion = null;
-        _lastMoveKeys = undefined;
-        _resetMoveLine();
-        _syncChessground();
-        if (_onPositionChange) _onPositionChange(currentFen());
+        _commitReplacedPosition(built.pos, prevFen);
         return { ok: true };
     }
 
@@ -898,14 +881,7 @@ const Board = (() => {
         const resetFen = '4k3/8/8/8/8/8/8/4K3 w - - 0 1';
         const built = _buildPosition(resetFen);
         console.assert(built.ok, 'clear(): resetFen must always be valid');
-        _pushHistory(prevFen);
-        _position = built.pos;
-        _hidePromotionDialog();
-        _pendingPromotion = null;
-        _lastMoveKeys = undefined;
-        _resetMoveLine();
-        _syncChessground();
-        if (_onPositionChange) _onPositionChange(resetFen);
+        _commitReplacedPosition(built.pos, prevFen);
         return resetFen;
     }
 
@@ -920,7 +896,7 @@ const Board = (() => {
     function flip() {
         cg.toggleOrientation();
         _syncTrayOrientation();
-        Storage.write('chesstb_orientation', cg.state.orientation);
+        Storage.write(STORAGE_KEYS.ORIENTATION, cg.state.orientation);
         clearArrows();   // arrows are orientation-dependent; caller (useExplorer.js) redraws right after flip
     }
 
@@ -937,7 +913,7 @@ const Board = (() => {
             if (_locked) el.setAttribute('title', 'Board is locked');
             else el.removeAttribute('title');
         });
-        if (persist) Storage.write('chesstb_locked', _locked);
+        if (persist) Storage.write(STORAGE_KEYS.LOCKED, _locked);
         _syncChessground();
     }
     function isLocked() { return _locked; }
@@ -1005,40 +981,26 @@ const Board = (() => {
         if (!_position) return false;
         const move = parseSan(_position, san);
         if (!move) return false;
-        const fromKey = makeSquare(move.from), toKey = makeSquare(move.to);
-        const playedSan = makeSan(_position, move);
-        _position.play(move);
-
-        _lastMoveKeys = [fromKey, toKey];
-
         // Track in the move tree (branches instead of overwriting if the
         // user had navigated back before playing this move).
-        _addMove(playedSan, currentFen(), fromKey, toKey);
-        _emitHistory();
-        _syncChessground();
-
-        // immediate=true: this is a single, definite move (played by
-        // auto-play or by clicking a move in the ranked-moves table, the
-        // two callers of playMove() - see useExplorer.js), not part of a
-        // rapid-fire stream of changes the 300ms debounce guards against.
-        if (_onPositionChange) _onPositionChange(currentFen(), true);
+        _commitPlayedMove(move, makeSquare(move.from), makeSquare(move.to));
         return true;
     }
 
     // Back/Forward walk the move tree directly (parent / activeChild) so
     // stepping through a line that includes variations works the same as
     // stepping through the main line. The plain _history/_future FEN stack
-    // is only consulted once navigation reaches the tree's root (id ROOT)
+    // is only consulted once navigation reaches the tree's root (id ROOT_ID)
     // and goes further back than the tree itself - i.e. undoing past
     // whatever move/edit started the current tree (see _resetMoveLine).
     function goBack() {
-        if (_currentId !== ROOT) {
+        if (_currentId !== ROOT_ID) {
             const parentId = _nodes[_currentId].parentId;
-            const fen = parentId === ROOT ? _startFen : _nodes[parentId].fen;
+            const fen = parentId === ROOT_ID ? _startFen : _nodes[parentId].fen;
             const built = _buildPosition(fen);
             if (!built.ok) { _syncChessground(); return false; }
             _position = built.pos;
-            _lastMoveKeys = parentId === ROOT ? undefined : [_nodes[parentId].from, _nodes[parentId].to];
+            _lastMoveKeys = parentId === ROOT_ID ? undefined : [_nodes[parentId].from, _nodes[parentId].to];
             _currentId = parentId;
         } else {
             if (_history.length === 0) return false;
@@ -1059,9 +1021,9 @@ const Board = (() => {
             // The loaded position does not match the tree's _startFen, so
             // the tree is reset. _resetMoveLine() also clears _future, so the
             // stack is saved and restored around the reset.
-            const _pendingFuture = _future.slice();
-            _resetMoveLine();
-            _future = _pendingFuture;
+            const pendingFuture = _future;
+            _resetMoveLine({ emit: false });
+            _future = pendingFuture;
         }
         _hidePromotionDialog();
         _pendingPromotion = null;
@@ -1080,7 +1042,7 @@ const Board = (() => {
             _position = built.pos;
             _lastMoveKeys = [node.from, node.to];
             _currentId = activeChildId;
-        } else if (_currentId === ROOT && _future.length > 0) {
+        } else if (_currentId === ROOT_ID && _future.length > 0) {
             const nextFen = _future.pop();
             const built = _buildPosition(nextFen);
             if (!built.ok) {
@@ -1095,9 +1057,9 @@ const Board = (() => {
             // isn't described by the current (already-reset) tree either, so
             // restart the tree here too and preserve any remaining redo
             // entries across the reset.
-            const _pendingFuture = _future.slice();
-            _resetMoveLine();
-            _future = _pendingFuture;
+            const pendingFuture = _future;
+            _resetMoveLine({ emit: false });
+            _future = pendingFuture;
         } else {
             return false;
         }
@@ -1112,12 +1074,12 @@ const Board = (() => {
     // goToNode() jumps to an arbitrary node in the current move tree (used
     // by the PGN panel - including variation moves, not just the main line).
     // Unlike setPosition(), this never calls _resetMoveLine(). targetId ===
-    // ROOT (-1) means "start of the tree" (the position before any move was
+    // ROOT_ID (-1) means "start of the tree" (the position before any move was
     // played). Clicking any node marks it - and every ancestor on the path
     // to it - as its parent's activeChild, so Forward continues along
     // whichever branch was just brought into view.
     function goToNode(targetId) {
-        if (targetId !== ROOT && !_nodes[targetId]) return false;
+        if (targetId !== ROOT_ID && !_nodes[targetId]) return false;
         if (targetId === _currentId) return true;
 
         // Walked before touching _position/_syncChessground, and bounded to
@@ -1126,21 +1088,21 @@ const Board = (() => {
         const chain = [];
         let walk  = targetId;
         let guard = _nodes.length + 1;
-        while (walk !== ROOT) {
+        while (walk !== ROOT_ID) {
             if (guard-- <= 0 || !_nodes[walk]) return false;
             chain.unshift(walk);
             walk = _nodes[walk].parentId;
         }
 
-        const fen = targetId === ROOT ? _startFen : _nodes[targetId].fen;
+        const fen = targetId === ROOT_ID ? _startFen : _nodes[targetId].fen;
         const built = _buildPosition(fen);
         if (!built.ok) return false;
         _position = built.pos;
 
-        let parent = ROOT;
+        let parent = ROOT_ID;
         chain.forEach(id => { _setActiveChild(parent, id); parent = id; });
         _currentId = targetId;
-        _lastMoveKeys = targetId === ROOT ? undefined : [_nodes[targetId].from, _nodes[targetId].to];
+        _lastMoveKeys = targetId === ROOT_ID ? undefined : [_nodes[targetId].from, _nodes[targetId].to];
 
         _hidePromotionDialog();
         _pendingPromotion = null;
@@ -1151,7 +1113,7 @@ const Board = (() => {
     }
 
     // A legitimately-built tree (see _addMove above) only ever gives a node
-    // a parentId that's ROOT or an already-existing, strictly smaller id,
+    // a parentId that's ROOT_ID or an already-existing, strictly smaller id,
     // and only ever lists children/activeChild with a strictly larger one,
     // so parentId chains and children references can never cycle or dangle.
     // Persisted state coming back out of localStorage bypasses that
@@ -1166,7 +1128,7 @@ const Board = (() => {
         for (let id = 0; id < nodes.length; id++) {
             const node = nodes[id];
             if (!node || typeof node.san !== 'string' || typeof node.fen !== 'string') return false;
-            if (node.parentId !== ROOT && !(_isValidNodeRef(node.parentId, nodes.length) && node.parentId < id)) {
+            if (node.parentId !== ROOT_ID && !(_isValidNodeRef(node.parentId, nodes.length) && node.parentId < id)) {
                 return false;
             }
             if (!Array.isArray(node.children)) return false;
@@ -1192,10 +1154,10 @@ const Board = (() => {
         const validTree        = _isValidTree(nodes, rootChildren);
         const safeNodes        = validTree ? nodes : [];
         const safeRootChildren = validTree ? rootChildren : [];
-        const safeCurrentId    = (currentId === ROOT || (validTree && _isValidNodeRef(currentId, safeNodes.length)))
-            ? currentId : ROOT;
+        const safeCurrentId    = (currentId === ROOT_ID || (validTree && _isValidNodeRef(currentId, safeNodes.length)))
+            ? currentId : ROOT_ID;
 
-        const loadFen = safeCurrentId === ROOT ? startFen : safeNodes[safeCurrentId].fen;
+        const loadFen = safeCurrentId === ROOT_ID ? startFen : safeNodes[safeCurrentId].fen;
         const built = _buildPosition(loadFen);
         if (!built.ok) {
             // Saved state doesn't parse (e.g. corrupted storage) - fall back
@@ -1206,7 +1168,7 @@ const Board = (() => {
             _nodes            = [];
             _rootChildren     = [];
             _rootActiveChild  = null;
-            _currentId        = ROOT;
+            _currentId        = ROOT_ID;
             _history          = [];
             _future           = [];
             _lastMoveKeys     = undefined;
@@ -1226,7 +1188,7 @@ const Board = (() => {
         _currentId        = safeCurrentId;
         _history          = [];
         _future           = [];
-        _lastMoveKeys     = (safeCurrentId === ROOT || !safeNodes[safeCurrentId])
+        _lastMoveKeys     = (safeCurrentId === ROOT_ID || !safeNodes[safeCurrentId])
             ? undefined
             : [safeNodes[safeCurrentId].from, safeNodes[safeCurrentId].to];
 
@@ -1237,10 +1199,26 @@ const Board = (() => {
         return true;
     }
 
-    function canGoBack()    { return _currentId !== ROOT || _history.length > 0; }
+    // Installs a parsed PGN in one update. Only the displayed start position
+    // is probed; every imported move remains available for navigation and export.
+    function importGame(tree, variant) {
+        const next = variant === VARIANTS.CHESS960 ? VARIANTS.CHESS960 : VARIANTS.STANDARD;
+        const built = _buildPosition(tree.startFen, next);
+        if (!built.ok) return { ok: false, reason: built.reason };
+        if (!_isValidTree(tree.nodes, tree.rootChildren)) {
+            return { ok: false, reason: 'Invalid move tree in PGN.' };
+        }
+        _variant = next;
+        _position = built.pos;
+        restoreTree(tree.startFen, tree.nodes, tree.rootChildren, tree.rootActiveChild, ROOT_ID);
+        if (_onPositionChange) _onPositionChange(currentFen(), true);
+        return { ok: true };
+    }
+
+    function canGoBack()    { return _currentId !== ROOT_ID || _history.length > 0; }
     function canGoForward() {
         const activeChildId = _activeChildOf(_currentId);
-        return (activeChildId !== null && activeChildId !== undefined) || (_currentId === ROOT && _future.length > 0);
+        return (activeChildId !== null && activeChildId !== undefined) || (_currentId === ROOT_ID && _future.length > 0);
     }
 
     function getMoveHistory() {
@@ -1253,7 +1231,7 @@ const Board = (() => {
 
     return {
         init, reconstruct, setPosition, setPositionAndVariant, clear, flip, currentFen,
-        playMove, goBack, goForward, goToNode, restoreTree, canGoBack, canGoForward,
+        playMove, goBack, goForward, goToNode, restoreTree, importGame, canGoBack, canGoForward,
         getMoveHistory, getStartFen, setOnMoveHistoryChange,
         drawArrows, clearArrows,
         setLocked, isLocked,
@@ -1262,4 +1240,4 @@ const Board = (() => {
 
 })();
 
-export { Board, VARIANTS };
+export { Board };

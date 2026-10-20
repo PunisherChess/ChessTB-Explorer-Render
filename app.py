@@ -57,7 +57,7 @@ is rejected as invalid input before the board is ever probed (see
 _validate_and_build_board). A position with castling rights is otherwise
 probed like any other: `chess.chesstb` resolves it when the loaded
 tablebase set carries a table for that material (see config.py's
-TABLEBASE_PATH_CASTLING and tablebase_router.py -- unaffected by variant,
+TABLEBASE_PATH and tablebase_router.py -- unaffected by variant,
 since a Chess960 board's clean_castling_rights() reports the same way a
 Standard board's does), and reports it as not covered when it doesn't.
 
@@ -197,10 +197,10 @@ def _validated_str(name: str, value) -> str:
 
 
 def _validated_path_spec(name: str, value) -> str | list[str]:
-    """TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING: a
-    single path (local directory or http(s):// URL) or a list of them for
-    a hybrid source (see tablebase_router.py). Each list entry must
-    itself be a string -- a nested list isn't a valid hybrid source."""
+    """TABLEBASE_PATH: a single path (local directory or http(s):// URL)
+    or a list of them for a hybrid source (see tablebase_router.py). Each
+    list entry must itself be a string -- a nested list isn't a valid
+    hybrid source."""
     if isinstance(value, str):
         return value
     if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
@@ -229,17 +229,6 @@ class AppConfig:
     probe_threads:       int
     parallel_threshold:  int
     probe_timeout:       float
-    # <=6-men tablebase, same accepted forms as tablebase_path. Empty
-    # routes every non-castling position -- 7 and 8 men included --
-    # through tablebase_path (see tablebase_router.RoutedTablebase).
-    tablebase_path_7_8:  str | list[str]
-    # Castling-rights-aware tablebase, same accepted forms as
-    # tablebase_path. Independent of piece count: a position with a
-    # still-usable castling right routes here first, regardless of how
-    # many men are on the board. Empty routes such a position through the
-    # same piece-count selection as tablebase_path_7_8 above instead (see
-    # tablebase_router.RoutedTablebase).
-    tablebase_path_castling: str | list[str]
     host:                str
     port:                int
     evaluate_cache_size: int
@@ -247,10 +236,9 @@ class AppConfig:
     block_cache_bytes:   int
     debug:               bool
     waitress_threads:    int
-    # Only used for an http(s):// URL entry in tablebase_path,
-    # tablebase_path_7_8, or tablebase_path_castling (see "ChessTB
-    # backend" above and remote/remote_source.py) -- ignored entirely for
-    # a local-directory entry. Bounds an on-disk LRU of whole downloaded
+    # Only used for an http(s):// URL entry in tablebase_path (see
+    # "ChessTB backend" above and remote/remote_source.py) -- ignored
+    # entirely for a local-directory entry. Bounds an on-disk LRU of whole downloaded
     # table files cached by remote/remote_fallback.py (see that file's
     # module docstring for the full design).
     remote_mode:             str
@@ -297,9 +285,6 @@ class AppConfig:
             probe_threads=threads,
             parallel_threshold=_validated_int("PROBE_PARALLEL_THRESHOLD", config.PROBE_PARALLEL_THRESHOLD),
             probe_timeout=_validated_float("PROBE_TIMEOUT_SECS", config.PROBE_TIMEOUT_SECS),
-            tablebase_path_7_8=_validated_path_spec("TABLEBASE_PATH_7_8", config.TABLEBASE_PATH_7_8),
-            tablebase_path_castling=_validated_path_spec(
-                "TABLEBASE_PATH_CASTLING", config.TABLEBASE_PATH_CASTLING),
             host=_validated_str("HOST", config.HOST),
             port=_validated_int("PORT", config.PORT, max_val=65535),
             evaluate_cache_size=_validated_int("EVALUATE_CACHE_SIZE", config.EVALUATE_CACHE_SIZE),
@@ -467,38 +452,25 @@ def rate_limit_exceeded(e: Exception) -> tuple:
 
 
 # ── Tablebase + thread pool ───────────────────────────────────────────────────
-# TABLEBASE_PATH (<=6 men), TABLEBASE_PATH_7_8 (7-8 men), and
-# TABLEBASE_PATH_CASTLING (any castling-rights-bearing position,
-# independent of piece count) are opened independently and combined into
-# one RoutedTablebase, whose upstream-compatible lookup also serves
-# recursive dependency probes. See tablebase_router.py for the routing rules.
+# TABLEBASE_PATH is opened as one ordered source list and wrapped in a
+# SourcedTablebase, whose upstream-compatible lookup also serves recursive
+# dependency probes. See tablebase_router.py for the resolution rules.
 
-def _open_tier(spec, label: str):
-    """Opens one tier via tablebase_router.open_many(), converting any
-    failure to None instead of letting it escape -- so a failure opening
-    one tier (e.g. an unreachable optional TABLEBASE_PATH_7_8 /
-    TABLEBASE_PATH_CASTLING source) can never discard a sibling tier
-    that already opened successfully."""
-    try:
-        return tablebase_router.open_many(
-            spec, label=label, cfg=cfg,
-            remote_source=remote_source, remote_direct=remote_direct,
-            remote_download=remote_fallback,
-        )
-    except Exception as e:
-        log.warning("Failed to open %s: %s", label, e)
-        return None
-
-
-_tb_low = _open_tier(cfg.tablebase_path, "TABLEBASE_PATH")
-_tb_high = _open_tier(cfg.tablebase_path_7_8, "TABLEBASE_PATH_7_8")
-_tb_castling = _open_tier(cfg.tablebase_path_castling, "TABLEBASE_PATH_CASTLING")
-TB = (
-    tablebase_router.RoutedTablebase(
-        low=_tb_low, high=_tb_high, castling=_tb_castling,
-        remote_source=remote_source, block_cache_bytes=cfg.block_cache_bytes,
+try:
+    _tb_source = tablebase_router.open_many(
+        cfg.tablebase_path, label="TABLEBASE_PATH", cfg=cfg,
+        remote_source=remote_source, remote_direct=remote_direct,
+        remote_download=remote_fallback,
     )
-    if (_tb_low or _tb_high or _tb_castling) else None
+except Exception as e:
+    log.warning("Failed to open TABLEBASE_PATH: %s", e)
+    _tb_source = None
+TB = (
+    tablebase_router.SourcedTablebase(
+        _tb_source, remote_source=remote_source,
+        block_cache_bytes=cfg.block_cache_bytes,
+    )
+    if _tb_source is not None else None
 )
 
 _executor = ThreadPoolExecutor(max_workers=cfg.probe_threads, thread_name_prefix="tb_probe")
@@ -604,6 +576,19 @@ def _normalize_fen(fen: str) -> str:
 # ── Sort helpers ──────────────────────────────────────────────────────────────
 
 _OUTCOME_RANK: dict[int, int] = {2: 0, 1: 1, 0: 2, -1: 3, -2: 4}
+_PROMOTION_RANK = {"Q": 0, "R": 1, "B": 2, "N": 3}
+
+
+def _move_tiebreak(san: str) -> tuple[int, str, int, str]:
+    """Last sort-key component: immediate mate first, then SAN order with
+    promotions ranked Q, R, B, N. It applies only after outcome, DTC order,
+    and distance, so a better underpromotion still outranks a worse queen
+    promotion."""
+    mate_rank = 0 if san.endswith("#") else 1
+    prefix, separator, promotion = san.partition("=")
+    if separator:
+        return mate_rank, prefix, _PROMOTION_RANK[promotion[0]], promotion[1:]
+    return mate_rank, san, 0, ""
 
 
 def _outcome_rank(wdl_val: int) -> int:
@@ -675,10 +660,8 @@ def _is_cursed_exit(parent: chess.Board, child: chess.Board, child_wdl: int) -> 
 
 def _capped_wdl(move_wdl: int, root_wdl: int) -> int:
     """move_wdl capped at root_wdl: a move can never be better than the root
-    position's own optimal value (see _effective_move_wdl). Used to bucket a
-    move's outcome from WDL alone for the response's summary counts - WDL is
-    the only metric every probeable move has, independent of which of
-    DTZ/DTC/DTM/DTM50 this material's tables happen to cover."""
+    position's own optimal value (see _effective_move_wdl). Used by the
+    clock-independent DTZ and DTM columns."""
     return root_wdl if move_wdl > root_wdl else move_wdl
 
 
@@ -1093,9 +1076,9 @@ def evaluate_all_moves(
     dtm50_rows: list[tuple] = []
 
     # Outcome per move for the response's summary counts (see
-    # _evaluate_fen_impl) - WDL alone, independent of which of
-    # DTZ/DTC/DTM/DTM50 this material's tables actually cover, since any one
-    # of those columns can end up entirely "not_available" below.
+    # _evaluate_fen_impl). Each outcome respects the child's halfmove clock:
+    # DTM50 and DTC already resolve the 50-move rule, and clock-independent
+    # WDL cannot establish a win or loss when both are unavailable.
     move_outcomes: list[str] = []
 
     # Sort key/entry pair for a move whose own metric table doesn't cover
@@ -1106,7 +1089,8 @@ def evaluate_all_moves(
         san: str, child_fen: str | None, move_is_mate: bool,
         draw_reason: str | None, has_order: bool = False,
     ) -> tuple[tuple, MoveEntry]:
-        key = (_outcome_rank(0) + 10, 0, 0, san) if has_order else (_outcome_rank(0) + 10, 0, san)
+        tiebreak = _move_tiebreak(san)
+        key = (_outcome_rank(0) + 10, 0, 0, tiebreak) if has_order else (_outcome_rank(0) + 10, 0, tiebreak)
         entry: MoveEntry = {
             "san": san, "plies": 0, "order": 0, "is_mate": move_is_mate, "available": False,
             "outcome": "not_available", "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1118,7 +1102,7 @@ def evaluate_all_moves(
         child_fen: str | None, draw_reason: str | None,
     ) -> tuple[tuple, DtzMoveEntry, int]:
         eff_wdl = _effective_move_wdl(my_wdl, root_wdl, eff_dtz)
-        key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtz), san)
+        key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtz), _move_tiebreak(san))
         entry: DtzMoveEntry = {
             "san": san, "plies": abs(eff_dtz), "order": 0, "is_mate": move_is_mate, "available": True,
             "outcome": _outcome_label(eff_wdl), "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1151,8 +1135,8 @@ def evaluate_all_moves(
                     "san": san, "plies": 0, "order": 0, "is_mate": False, "available": False,
                     "outcome": "unknown", "child_fen": child_fen, "draw_reason": None,
                 }
-                stub_key = (_outcome_rank(0) + 10, 0, san)
-                dtc_stub_key = (_outcome_rank(0) + 10, 0, 0, san)
+                stub_key = (_outcome_rank(0) + 10, 0, _move_tiebreak(san))
+                dtc_stub_key = (_outcome_rank(0) + 10, 0, 0, _move_tiebreak(san))
                 dtz_rows.append((stub_key, stub))
                 dtc_rows.append((dtc_stub_key, stub))
                 dtm_rows.append((stub_key, stub))
@@ -1172,7 +1156,19 @@ def evaluate_all_moves(
             opp_dtm50 = probe_result.dtm50
 
         my_wdl = -opp_wdl
-        move_outcomes.append(_outcome_label(_capped_wdl(my_wdl, root_wdl)))
+        if opp_has_dtm50:
+            summary_wdl = -opp_dtm50_wdl
+        elif opp_has_dtc:
+            summary_wdl = -opp_dtc_wdl
+        else:
+            # Draws, cursed wins, and blessed losses are draws under the
+            # rule; a win or loss needs DTM50 or DTC to resolve the clock.
+            summary_wdl = 0 if abs(my_wdl) <= 1 else None
+        move_outcomes.append(
+            "win" if summary_wdl == 2 else
+            "loss" if summary_wdl == -2 else
+            "unknown" if summary_wdl is None else "draw"
+        )
 
         # DTZ row.
         if opp_has_dtz:
@@ -1192,7 +1188,12 @@ def evaluate_all_moves(
             if move_is_zeroing:
                 eff_dtz = _effective_distance(my_wdl, 0)
             elif cursed_exit:
-                eff_dtz = _apply_sign(option.value[0], my_wdl)
+                # A rounded derived child can be even, so its true exit
+                # distances span y+1..y+3. Reporting y+2 keeps the displayed
+                # error within one ply; option.value keeps the possible
+                # distances for the anchor.
+                exit_dtz = opp_dtz + 2 if opp_dtz_rounded else option.value[0]
+                eff_dtz = _apply_sign(exit_dtz, my_wdl)
             else:
                 eff_dtz = _effective_distance(my_wdl, my_dtz)
             dtz_key, dtz_entry, eff_wdl = _dtz_row(
@@ -1269,7 +1270,7 @@ def evaluate_all_moves(
                 _outcome_rank(my_dtc_wdl),
                 _order_rank(my_dtc_wdl, eff_order),
                 _ply_rank(my_dtc_wdl, eff_dtc),
-                san,
+                _move_tiebreak(san),
             )
             dtc_rows.append((dtc_key, {
                 "san": san, "plies": abs(eff_dtc), "order": eff_order, "is_mate": move_is_mate,
@@ -1288,12 +1289,13 @@ def evaluate_all_moves(
                 # loss) bucket and label as the DTZ row above, since that
                 # status is a single fact about eff_dtz and root_wdl rather
                 # than a separate one per metric.
-                dtm_key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtm), san)
+                dtm_key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtm), _move_tiebreak(san))
                 dtm_outcome = outcome
             else:
                 # Without DTZ the bucket comes from WDL alone.
                 dtm_eff_wdl = _capped_wdl(my_wdl, root_wdl)
-                dtm_key = (_outcome_rank(dtm_eff_wdl), _ply_rank(dtm_eff_wdl, eff_dtm), san)
+                dtm_key = (_outcome_rank(dtm_eff_wdl), _ply_rank(dtm_eff_wdl, eff_dtm),
+                           _move_tiebreak(san))
                 dtm_outcome = _outcome_label(dtm_eff_wdl)
             dtm_rows.append((dtm_key, {
                 "san": san, "plies": abs(eff_dtm), "order": 0, "is_mate": move_is_mate, "available": True,
@@ -1307,7 +1309,8 @@ def evaluate_all_moves(
             my_dtm50_wdl = -opp_dtm50_wdl
             my_dtm50 = _apply_sign(opp_dtm50, my_dtm50_wdl)
             eff_dtm50 = _effective_distance(my_dtm50_wdl, my_dtm50)
-            dtm50_key = (_outcome_rank(my_dtm50_wdl), _ply_rank(my_dtm50_wdl, eff_dtm50), san)
+            dtm50_key = (_outcome_rank(my_dtm50_wdl), _ply_rank(my_dtm50_wdl, eff_dtm50),
+                         _move_tiebreak(san))
             dtm50_rows.append((dtm50_key, {
                 "san": san, "plies": abs(eff_dtm50), "order": 0, "is_mate": move_is_mate, "available": True,
                 "outcome": _outcome_label(my_dtm50_wdl), "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1339,9 +1342,9 @@ def evaluate_all_moves(
     dtm50_rows.sort(key=lambda r: r[0])
 
     summary = {
-        "wins":    sum(1 for o in move_outcomes if o in ("win", "cursed_win")),
+        "wins":    sum(1 for o in move_outcomes if o == "win"),
         "draws":   sum(1 for o in move_outcomes if o == "draw"),
-        "losses":  sum(1 for o in move_outcomes if o in ("loss", "blessed_loss")),
+        "losses":  sum(1 for o in move_outcomes if o == "loss"),
         "unknown": sum(1 for o in move_outcomes if o == "unknown"),
     }
 
@@ -1378,8 +1381,7 @@ def _validate_and_build_board(variant: str, fen: str) -> chess.Board:
     """
     if TB is None:
         raise RuntimeError(
-            "Tablebase not initialised. Check TABLEBASE_PATH / TABLEBASE_PATH_7_8 / "
-            "TABLEBASE_PATH_CASTLING.")
+            "Tablebase not initialised. Check TABLEBASE_PATH.")
 
     parts = fen.split()
     fmt_error = _validate_fen_parts(variant, parts)
@@ -1611,9 +1613,8 @@ def probe() -> Response | tuple[Response, int]:
         return jsonify(_missing_table_error_payload(variant, fen)), 400
 
     except RuntimeError as e:
-        # Tablebase not initialised (TABLEBASE_PATH, TABLEBASE_PATH_7_8,
-        # and TABLEBASE_PATH_CASTLING all unset, or all failed to load) --
-        # same condition and status code as /health's own "degraded"
+        # Tablebase not initialised (TABLEBASE_PATH unset or failed to
+        # load) -- same condition and status code as /health's own "degraded"
         # response for this, and the same message _validate_and_build_board
         # raises for /probe/stream to report over SSE.
         return jsonify({"error": str(e)}), 503
@@ -1824,15 +1825,12 @@ def clear_cache() -> Response:
     evaluate_fen.cache_clear()
     _probe_fen.cache_clear()
     # The two LRUs above are app.py-level caches keyed on (variant, FEN)
-    # pairs. They are not the only cache in the probing pipeline: each tier's
-    # underlying tablebase can keep its own internal decoded-block cache
-    # and, in remote mode, a downloaded-file cache (remote/remote_fallback.py).
-    # RoutedTablebase.clear_caches()/cache_stats() are exposed on TB
-    # itself, but only actually clear/report something for a tier backed
-    # by a remote/remote_fallback.py Tablebase -- a plain local-directory
-    # Tablebase has no such cache. cache_stats() coming back empty is what
-    # distinguishes "nothing to clear" from "cleared something", since
-    # every tier is asked unconditionally either way.
+    # pairs. They are not the only cache in the probing pipeline: the
+    # tablebase keeps its own decoded-block cache and, in remote mode, a
+    # downloaded-file cache (remote/remote_fallback.py).
+    # SourcedTablebase.clear_caches()/cache_stats() are exposed on TB
+    # itself and cover both, so cache_stats() coming back empty means no
+    # tablebase is loaded.
     tb_cache_info: dict = {}
     if TB is not None:
         TB.clear_caches()
@@ -1872,15 +1870,12 @@ def cache_stats() -> Response:
             "block_cache_bytes":   cfg.block_cache_bytes,
         },
         "tablebase": {
-            "low_configured":       TB.low is not None if TB is not None else False,
-            "high_configured":      TB.high is not None if TB is not None else False,
-            "castling_configured":  TB.castling is not None if TB is not None else False,
+            "configured": TB is not None,
         },
     }
-    # RoutedTablebase.cache_stats() is exposed on TB and reports the configured tiers
-    # -- a tier contributes no key when it has no remote-backed cache to
-    # report (see clear_cache() above for why a plain local-directory
-    # Tablebase has none).
+    # SourcedTablebase.cache_stats() is exposed on TB and reports the block
+    # cache plus the source's own caches -- a plain local-directory
+    # Tablebase has none (see clear_cache() above).
     if TB is not None:
         tb_cache = TB.cache_stats()
         if tb_cache:

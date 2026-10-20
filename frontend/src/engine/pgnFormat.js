@@ -1,35 +1,18 @@
 /**
- * pgnFormat.js: move-tree helpers, PGN export text, and PGN import parsing
+ * pgnFormat.js: PGN export text and PGN import parsing
  *
- * The tree-walking helpers (childrenOf/collectMainPath) are shared by the
- * move-list panel and the PGN exporter so the two can't disagree about
- * where a variation forks.
+ * Walks the move tree with the same helpers (tree.js) as the move-list
+ * panel so the two can't disagree about where a variation forks.
  */
 
-import { Board, VARIANTS } from './board.js';
+import { Board } from './board.js';
+import { VARIANTS, ROOT_ID } from './constants.js';
+import { childrenOf, collectMainPath } from './tree.js';
 import { Chess } from '../vendor/chessops/chess.js';
 import { parseFen, makeFen } from '../vendor/chessops/fen.js';
 import { parsePgnStrict, PgnError } from '../vendor/chessops/pgn.js';
-import { parseSan } from '../vendor/chessops/san.js';
-
-export const ROOT_ID = -1;
-
-export function childrenOf(nodes, rootChildren, id) {
-    return id === ROOT_ID ? rootChildren : nodes[id].children;
-}
-
-// Follows children[0] repeatedly from startId - one line's worth of node
-// ids (its own "main" continuation).
-export function collectMainPath(nodes, startId) {
-    const ids = [];
-    let cur = startId;
-    while (cur !== null && cur !== undefined) {
-        ids.push(cur);
-        const kids = nodes[cur].children;
-        cur = kids.length ? kids[0] : null;
-    }
-    return ids;
-}
+import { parseSan, makeSan } from '../vendor/chessops/san.js';
+import { makeSquare } from '../vendor/chessops/util.js';
 
 // Derives {turn, fullmove} from a FEN's 2nd/6th fields, for numbering a
 // move line that doesn't start from a fresh game.
@@ -122,8 +105,8 @@ function isChess960VariantHeader(value) {
     return /chess\s*960|fischer\s*random/i.test(value || '');
 }
 
-// Parses a PGN string into a list of {label, fen} snapshots (Start plus
-// one per played move) and the variant declared by its Variant header.
+// Parses and validates the entire game tree, including variations, into
+// Board's move-history format and the variant declared by its Variant header.
 // Returns { ok: false, error } on any rejection.
 export function parsePgn(text) {
     const trimmed = text.trim();
@@ -156,22 +139,41 @@ export function parsePgn(text) {
         const parsed = parseFen(fenHeader);
         const built  = parsed.isErr ? null : Chess.fromSetup(parsed.value);
         pos = (built && !built.isErr) ? built.value : null;
+        if (!pos) return { ok: false, error: 'Invalid FEN starting position in PGN.' };
     }
     if (!pos) pos = Chess.default();
     const startFen = makeFen(pos.toSetup());
 
-    const snapshots = [{ label: 'Start', fen: startFen }];
-    const { turn, fullmove } = parseFenMeta(startFen);
-    let moveNum = fullmove;
-    let isWhite = turn === 'w';
-    for (const node of moves) {
-        const move = parseSan(pos, node.san);
-        if (!move) return { ok: false, error: `Invalid move in PGN: ${node.san}` };
-        pos.play(move);
-        const label = isWhite ? `${moveNum}. ${node.san}` : `${moveNum}… ${node.san}`;
-        snapshots.push({ label, fen: makeFen(pos.toSetup()) });
-        if (!isWhite) moveNum++;
-        isWhite = !isWhite;
+    const tree = { startFen, nodes: [], rootChildren: [], rootActiveChild: null, currentId: ROOT_ID };
+    const pending = [{ source: game.moves, parentId: ROOT_ID, pos }];
+    // An explicit stack handles long lines without recursion limits.
+    while (pending.length) {
+        const frame = pending.pop();
+        const next = [];
+        for (const child of frame.source.children) {
+            const childPos = frame.pos.clone();
+            const move = parseSan(childPos, child.data.san);
+            if (!move) return { ok: false, error: `Invalid move in PGN: ${child.data.san}` };
+            const san = makeSan(childPos, move);
+            childPos.play(move);
+            const id = tree.nodes.length;
+            tree.nodes.push({
+                id, san, fen: makeFen(childPos.toSetup()),
+                from: makeSquare(move.from), to: makeSquare(move.to),
+                parentId: frame.parentId, children: [], activeChild: null,
+            });
+            if (frame.parentId === ROOT_ID) {
+                tree.rootChildren.push(id);
+                if (tree.rootActiveChild === null) tree.rootActiveChild = id;
+            } else {
+                const parent = tree.nodes[frame.parentId];
+                parent.children.push(id);
+                if (parent.activeChild === null) parent.activeChild = id;
+            }
+            next.push({ source: child, parentId: id, pos: childPos });
+        }
+        // The main continuation is visited first, in source branch order.
+        pending.push(...next.reverse());
     }
-    return { ok: true, snapshots, variant };
+    return { ok: true, tree, variant };
 }

@@ -1,35 +1,13 @@
-"""tablebase_router.py - TABLEBASE_PATH routing by piece count and by
-castling rights.
+"""tablebase_router.py: ordered TABLEBASE_PATH source resolution.
 
-ChessTB ships two practically distinct table sets: everything with 6 or
-fewer men on the board, and the much larger 7-and-8-men set generated on
-top of it. Deployments commonly keep the two apart - 6-men tables are
-small enough to mirror locally without much thought, while 7-and-8-men
-tables run into the terabytes and are more often served remotely, kept
-only partially on disk, or split across a local cache plus a remote
-source for whatever hasn't been fetched yet. config.py exposes this as
-two independent settings, TABLEBASE_PATH (6-men and under) and
-TABLEBASE_PATH_7_8 (7 and 8 men).
+TABLEBASE_PATH accepts either one path (a local directory or an http(s)://
+URL) or a list of them. Entries are tried left-to-right for every material.
+A list mixing a local directory and a URL is a hybrid source.
 
-Separately, a position where a king or rook retains a still-usable
-castling right is answered by a different table than the same material
-without that right (chess.chesstb names it with a lowercase "r" - see
-specialized_config_from_board() in chess.chesstb - and a rights-bearing
-position is only ever resolved by that table, never by the plain one).
-ChessTB publishes this castling-aware set under one more path, again
-independent of piece count. config.py exposes it as TABLEBASE_PATH_CASTLING.
-
-RoutedTablebase below is what app.py opens as its single `TB` object. It
-routes material lookup inside one upstream `chesstb.Tablebase`, so the
-upstream prober's recursive dependency probes use the same low/high/castling
-sources as the root probe. A 7- or 8-man table can therefore derive a
-6-man child from TABLEBASE_PATH, and a castling-aware probe can resolve
-ordinary child material through the appropriate piece-count tier.
-
-TABLEBASE_PATH, TABLEBASE_PATH_7_8, and TABLEBASE_PATH_CASTLING each accept
-either one path (a local directory or an http(s):// URL) or a list of
-them. Entries are tried left-to-right within their selected tier. A list
-mixing a local directory and a URL is a hybrid source.
+SourcedTablebase below is what app.py opens as its single `TB` object. It
+resolves material lookup inside one upstream `chesstb.Tablebase`, so the
+upstream prober's recursive dependency probes use the same source order as
+the root probe.
 """
 from __future__ import annotations
 
@@ -42,17 +20,12 @@ from tablebase_opening import PerMaterialOpening, block_cache_usage
 
 log = logging.getLogger(__name__)
 
-#: Piece count (both kings included) at or under which a position uses the
-#: low (<=6-men) tier rather than the high (7-8-men) tier.
-SPLIT_PIECE_COUNT = 6
-
 #: A source exposing _find()/close() and optionally clear_caches()/
 #: cache_stats().
 TablebaseLike = Any
 
-#: A TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING config
-#: value: one path (local directory or http(s):// URL), or a list of
-#: them for a hybrid source.
+#: A TABLEBASE_PATH config value: one path (local directory or http(s)://
+#: URL), or a list of them for a hybrid source.
 PathSpec = Union[str, Sequence[str]]
 
 
@@ -69,8 +42,8 @@ def open_one(path: str, *, label: str, cfg: Any, remote_source: Any,
     hybrid-source entry.
 
     `label` names the path in log lines only (e.g. "TABLEBASE_PATH" or
-    "TABLEBASE_PATH_7_8[1]"), so a multi-source, multi-tier startup log
-    stays attributable to the setting that produced each line.
+    "TABLEBASE_PATH[1]"), so a multi-source startup log stays attributable
+    to the entry that produced each line.
     """
     if remote_source.looks_like_remote(path):
         remote_backend_name = cfg.remote_mode
@@ -110,8 +83,7 @@ def open_one(path: str, *, label: str, cfg: Any, remote_source: Any,
 
 def open_many(spec: PathSpec, *, label: str, cfg: Any, remote_source: Any,
               remote_direct: Any, remote_download: Any) -> Optional[TablebaseLike]:
-    """Opens a TABLEBASE_PATH-style config value `spec` (TABLEBASE_PATH,
-    TABLEBASE_PATH_7_8, or TABLEBASE_PATH_CASTLING) - one path or a
+    """Opens the TABLEBASE_PATH config value `spec` - one path or a
     hybrid list of them - returning a single already-opened tablebase
     (wrapped in CompositeTablebase when `spec` has more than one entry),
     or None if `spec` has no usable entries."""
@@ -183,8 +155,8 @@ class CompositeTablebase:
     remote_direct/remote_fallback backend - searched left-to-right until
     one resolves the material. Presents the same _find()/close()/
     clear_caches()/cache_stats() surface as a single chesstb.Tablebase,
-    so RoutedTablebase and app.py's admin routes don't need to know
-    whether a tier is backed by one source or several.
+    so SourcedTablebase and app.py's admin routes don't need to know
+    whether the resolver uses one source or several.
 
     A RemoteSourceError from one source (a network failure, not a "this
     material doesn't exist" answer) doesn't abort the walk - the next
@@ -237,8 +209,8 @@ class CompositeTablebase:
         return stats
 
 
-class RoutedTablebase(PerMaterialOpening, chesstb.Tablebase):
-    """A single upstream-compatible tablebase with tier-aware material lookup."""
+class SourcedTablebase(PerMaterialOpening, chesstb.Tablebase):
+    """A single upstream-compatible tablebase backed by one ordered resolver."""
 
     WDL_FILE = _HybridWDLFile
     DTZ_FILE = _HybridDTZFile
@@ -246,12 +218,9 @@ class RoutedTablebase(PerMaterialOpening, chesstb.Tablebase):
     DTM_FILE = _HybridDTMFile
     DTM50_FILE = _HybridDTM50File
 
-    def __init__(self, low: Optional[TablebaseLike], high: Optional[TablebaseLike],
-                 castling: Optional[TablebaseLike], *, remote_source: Any,
+    def __init__(self, source: TablebaseLike, *, remote_source: Any,
                  block_cache_bytes: int) -> None:
-        self.low = low
-        self.high = high
-        self.castling = castling
+        self.source = source
         self._remote_source = remote_source
         # A disk-cache resolver returns a pathname before the file is mapped.
         # Do not increase its open concurrency without a separate file-lease
@@ -262,11 +231,11 @@ class RoutedTablebase(PerMaterialOpening, chesstb.Tablebase):
                 return any(uses_download(s) for s in source._sources)
             return "_disk_cache" in getattr(source, "__dict__", {})
 
-        self._serialize_downloads = any(uses_download(s) for s in (low, high, castling))
+        self._serialize_downloads = uses_download(source)
         super().__init__("", block_cache_bytes=block_cache_bytes)
 
     def add_directory(self, directory: str) -> None:
-        """No-op: material lookup goes through the configured tiers."""
+        """No-op: material lookup goes through the ordered source resolver."""
 
     def _table_open_lock(self, kind: str, cache_key: Any) -> Any:
         # _open_locks is upstream's per-kind first-open lock table.
@@ -274,25 +243,8 @@ class RoutedTablebase(PerMaterialOpening, chesstb.Tablebase):
             return self._open_locks[kind]
         return super()._table_open_lock(kind, cache_key)
 
-    @staticmethod
-    def _piece_count_from_name(name: str) -> int:
-        # The pair is spelled once on each side (KpKp = four men): each
-        # lowercase p is one physical pawn, each lowercase r one castling rook.
-        return sum(ch.isupper() for ch in name) + name.count("p") + name.count("r")
-
-    def _sources_for_material(self, name: str) -> Optional[TablebaseLike]:
-        if "r" in name and self.castling is not None:
-            return self.castling
-        piece_count = self._piece_count_from_name(name)
-        if piece_count > SPLIT_PIECE_COUNT and self.high is not None:
-            return self.high
-        return self.low
-
     def _find(self, kind: str, name: str, ext: str) -> Optional[Any]:
-        source = self._sources_for_material(name)
-        if source is None:
-            return None
-        found = source._find(kind, name, ext)
+        found = self.source._find(kind, name, ext)
         if found is None:
             return None
         if isinstance(found, str):
@@ -305,25 +257,19 @@ class RoutedTablebase(PerMaterialOpening, chesstb.Tablebase):
         try:
             super().close()
         finally:
-            for source in (self.castling, self.high, self.low):
-                if source is not None:
-                    source.close()
+            self.source.close()
 
     def clear_caches(self) -> None:
         self._block_cache.clear()
-        for source in (self.castling, self.high, self.low):
-            if source is not None:
-                clear_fn = getattr(source, "clear_caches", None)
-                if clear_fn is not None:
-                    clear_fn()
+        clear_fn = getattr(self.source, "clear_caches", None)
+        if clear_fn is not None:
+            clear_fn()
 
     def cache_stats(self) -> dict:
         blocks, size = block_cache_usage(self)
-        stats = {"router_block_cache": {"blocks": blocks, "bytes": size}}
-        for name, source in (("low", self.low), ("high", self.high), ("castling", self.castling)):
-            if source is not None:
-                stats_fn = getattr(source, "cache_stats", None)
-                if stats_fn is not None:
-                    stats[name] = stats_fn()
+        stats = {"block_cache": {"blocks": blocks, "bytes": size}}
+        stats_fn = getattr(self.source, "cache_stats", None)
+        if stats_fn is not None:
+            stats["source"] = stats_fn()
         return stats
 
