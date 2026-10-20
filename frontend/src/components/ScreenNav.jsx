@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 const SCREENS = ['Board', 'Results', 'Moves'];
 
-export default function ScreenNav() {
+function ScreenNav() {
     const [current, setCurrent] = useState(0);
 
     useEffect(() => {
@@ -31,3 +31,5 @@ export default function ScreenNav() {
         </nav>
     );
 }
+
+export default memo(ScreenNav);

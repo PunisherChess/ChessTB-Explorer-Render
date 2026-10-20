@@ -8,7 +8,7 @@
  * #fen= of its own) restore the board position and PGN panel together.
  */
 
-import { VARIANTS } from './board.js';
+import { VARIANTS, STORAGE_KEYS } from './constants.js';
 import * as Storage from './storage.js';
 
 export function writeHash(fen, variant) {
@@ -40,10 +40,18 @@ export function readHashVariant() {
     } catch { return null; }
 }
 
-const _LS_GAME = 'chesstb_last_game';
+// Saves are debounced; a pending save is flushed when the page is hidden or unloaded.
+const SAVE_DELAY_MS = 400;
+let _pendingSave = null;
+let _saveTimer = null;
 
-export function saveGameState(history, startFen, variant) {
-    Storage.writeJson(_LS_GAME, {
+function _writePending() {
+    clearTimeout(_saveTimer);
+    _saveTimer = null;
+    if (!_pendingSave) return;
+    const { history, startFen, variant } = _pendingSave;
+    _pendingSave = null;
+    Storage.writeJson(STORAGE_KEYS.LAST_GAME, {
         variant,
         startFen,
         nodes:           history.nodes,
@@ -53,8 +61,22 @@ export function saveGameState(history, startFen, variant) {
     });
 }
 
+export function saveGameState(history, startFen, variant) {
+    // The board mutates the tree in place; the state is serialised at write time.
+    _pendingSave = { history, startFen, variant };
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(_writePending, SAVE_DELAY_MS);
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', _writePending);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') _writePending();
+    });
+}
+
 export function readLastGame() {
-    const parsed = Storage.readJson(_LS_GAME);
+    const parsed = Storage.readJson(STORAGE_KEYS.LAST_GAME);
     if (!parsed || typeof parsed.startFen !== 'string' || !Array.isArray(parsed.nodes)) {
         return null;
     }

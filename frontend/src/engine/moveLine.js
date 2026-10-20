@@ -2,20 +2,21 @@
  * moveLine.js: move-tree → render items
  *
  * Walks the branching move tree the same way the PGN exporter does (see
- * pgnFormat.js's childrenOf/collectMainPath) and produces a flat list of
+ * tree.js's childrenOf/collectMainPath) and produces a flat list of
  * render items for the move-list panel: 'row' items for the main line's
  * Rank/White/Black grid, and 'variation' items for parenthesised
  * alternatives, each carrying enough to expand into its own paragraph
  * without re-walking the tree.
  */
 
-import { ROOT_ID, childrenOf, collectMainPath } from './pgnFormat.js';
+import { ROOT_ID } from './constants.js';
+import { childrenOf, collectMainPath } from './tree.js';
 
 // Builds the main line as row items: one full move per row. A move with
 // alternatives gets a 'variation' item right after it instead of packed
 // into its own cell - since a variation spans the full row width, the
 // next row after it always starts fresh.
-export function buildMainLine(nodes, rootChildren, nodeIds, parentId, whiteToMove, moveNum, currentId) {
+function buildMainLine(nodes, rootChildren, nodeIds, parentId, whiteToMove, moveNum, currentId) {
     const items = [];
     let row = { kind: 'row', num: moveNum, white: whiteToMove ? null : { placeholder: true }, black: null };
     items.push(row);
@@ -41,13 +42,12 @@ export function buildMainLine(nodes, rootChildren, nodeIds, parentId, whiteToMov
             }
         }
 
-        if (i !== nodeIds.length - 1) {
-            if (wasWhite && !hasVariation) {
-                // continues into this row's still-empty black cell
-            } else {
-                row = { kind: 'row', num: moveNum, white: whiteToMove ? null : { placeholder: true }, black: null };
-                items.push(row);
-            }
+        // A white move with no variation continues into this row's
+        // still-empty black cell; anything else starts a fresh row.
+        const continuesRow = wasWhite && !hasVariation;
+        if (i !== nodeIds.length - 1 && !continuesRow) {
+            row = { kind: 'row', num: moveNum, white: whiteToMove ? null : { placeholder: true }, black: null };
+            items.push(row);
         }
     });
     return items;

@@ -27,12 +27,17 @@
  *     DTZ score is rounded.
  *   - CSV export of the current move table.
  *   - A result cache keyed by (variant, FEN), so revisiting an already-
- *     probed position reuses the cached result instead of issuing a new
- *     /probe/stream call.
+ *     probed position - or one warmed by hover-prefetch - reuses the cached
+ *     result instead of issuing a new /probe/stream call.
  */
 
-import { Board, VARIANTS } from './board.js';
-import * as Storage        from './storage.js';
+import { Board } from './board.js';
+import { VARIANTS, METRICS, STORAGE_KEYS } from './constants.js';
+import * as Storage from './storage.js';
+
+const _METRIC_GROUPS = Object.keys(METRICS).map(id => `group-${id}`);
+const _PROGRESS_IDLE    = Object.freeze({ visible: false, pct: 0, label: '' });
+const _PROGRESS_STARTED = Object.freeze({ visible: true,  pct: 0, label: 'Probing…' });
 
 // ── Bounded LRU cache ────────────────────────────────────────────────────
 const _MAX_CACHE_ENTRIES = 500;
@@ -57,7 +62,6 @@ class _BoundedCache {
             this._map.delete(this._map.keys().next().value);   // evict oldest
         }
     }
-    delete(key) { this._map.delete(key); }
 }
 
 const Tablebase = (() => {
@@ -71,8 +75,9 @@ const Tablebase = (() => {
     let _lastData     = null;
     let _lastFen      = null;     // FEN of the currently-applied results
     let _lastVariant  = null;     // variant the currently-applied results were probed under
-    let _prefetchCache = new _BoundedCache(_MAX_CACHE_ENTRIES);   // (variant,child_fen) → probe result data
-    let _resultCache   = new _BoundedCache(_MAX_CACHE_ENTRIES);   // (variant,fen) → last probe result
+    // (variant,fen) → complete probe result. Filled by both normal probes and
+    // hover-prefetch, so a prefetched position is a plain cache hit later.
+    const _resultCache = new _BoundedCache(_MAX_CACHE_ENTRIES);
 
     // Hover-prefetch state - module-scoped so probe() can see and cancel an
     // in-flight prefetch for the exact position it's about to probe itself.
@@ -96,17 +101,15 @@ const Tablebase = (() => {
     function _cacheKey(fen, variant) { return `${variant || VARIANTS.STANDARD}\u0000${fen}`; }
 
     // ── Show Root Row setting ────────────────────────────────────────────
-    const _LS_SHOW_ROOT_ROW = 'chesstb_show_root_row';
-    function _readShowRootRowPref() { return Storage.read(_LS_SHOW_ROOT_ROW) === 'true'; }
+    function _readShowRootRowPref() { return Storage.read(STORAGE_KEYS.SHOW_ROOT_ROW) === 'true'; }
     let _showRootRow = _readShowRootRowPref();
 
     const _ROOT_LABEL = 'Root';
 
     // ── WDL / formatting helpers ─────────────────────────────────────────
-    function _wdlToOutcome(wdl) {
-        return { 2:'win', 1:'cursed_win', 0:'draw', '-1':'blessed_loss', '-2':'loss' }[wdl] ?? 'unknown';
-    }
-    function _plural(n) { return Math.abs(n) === 1 ? 'ply' : 'plies'; }
+    const _WDL_OUTCOME = { 2: 'win', 1: 'cursed_win', 0: 'draw', '-1': 'blessed_loss', '-2': 'loss' };
+    function _wdlToOutcome(wdl) { return _WDL_OUTCOME[wdl] ?? 'unknown'; }
+    function _plural(n) { return n === 1 ? 'ply' : 'plies'; }   // n is already an absolute value
     function _pliesText(n) {
         const a = Math.abs(n);
         return `${a} ${_plural(a)}`;
@@ -207,14 +210,16 @@ const Tablebase = (() => {
         return [moveCell, scoreCell];
     }
 
+    function _moveLists(data) {
+        return Object.fromEntries(Object.entries(METRICS).map(([id, m]) => [id, data[m.dataKey] || []]));
+    }
+    function _maxRows(lists) {
+        return Math.max(...Object.values(lists).map(l => l.length));
+    }
+
     // ── Root row entries ──────────────────────────────────────────────────
     function _rootEntries(data, fen) {
-        const maxRows = Math.max(
-            (data.moves_dtz   || []).length,
-            (data.moves_dtc   || []).length,
-            (data.moves_dtm   || []).length,
-            (data.moves_dtm50 || []).length,
-        );
+        const maxRows = _maxRows(_moveLists(data));
         const rootIsMate = maxRows === 0 && data.wdl !== 0;
 
         const dtzEntry = {
@@ -249,10 +254,9 @@ const Tablebase = (() => {
     // Rebuilt on every meaningful change and pushed to _onViewState.
     let _viewState = {
         loading: false,
-        progress: { visible: false, pct: 0, label: '' },
+        progress: _PROGRESS_IDLE,
         error: null,               // { message, isCoverage } | null
         moveCount: '',
-        showRootRow: _showRootRow,
         rootRow: null,             // { cells: [...] } | null
         rows: [],                  // [{ rank, cells: [...] }]
         emptyState: true,
@@ -265,8 +269,7 @@ const Tablebase = (() => {
     function _rootRowState(data, fen) {
         if (!_showRootRow) return null;
         if (!data) {
-            const cells = ['group-dtz', 'group-dtc', 'group-dtm', 'group-dtm50']
-                .flatMap(g => _createMoveCells(null, g, false));
+            const cells = _METRIC_GROUPS.flatMap(g => _createMoveCells(null, g, false));
             return { cells };
         }
         const { dtzEntry, dtcEntry, dtmEntry, dtm50Entry } = _rootEntries(data, fen);
@@ -279,16 +282,16 @@ const Tablebase = (() => {
         return { cells };
     }
 
-    function _rowsState(movesDtz, movesDtc, movesDtm, movesDtm50) {
-        const maxRows = Math.max(movesDtz.length, movesDtc.length, movesDtm.length, movesDtm50.length);
+    function _rowsState(lists) {
+        const maxRows = _maxRows(lists);
         const rows = [];
         for (let i = 0; i < maxRows; i++) {
-            const dtcEntry = _dtcDisplayEntry(movesDtc[i] || null, (movesDtc[i] || {}).child_fen);
+            const dtcEntry = _dtcDisplayEntry(lists.dtc[i] || null, (lists.dtc[i] || {}).child_fen);
             const cells = [
-                ..._createMoveCells(movesDtz[i]   || null, 'group-dtz',   false),
-                ..._createMoveCells(dtcEntry,               'group-dtc',   false, true, true),
-                ..._createMoveCells(movesDtm[i]   || null, 'group-dtm',   true),
-                ..._createMoveCells(movesDtm50[i] || null, 'group-dtm50', true),
+                ..._createMoveCells(lists.dtz[i]   || null, 'group-dtz',   false),
+                ..._createMoveCells(dtcEntry,                'group-dtc',   false, true, true),
+                ..._createMoveCells(lists.dtm[i]   || null, 'group-dtm',   true),
+                ..._createMoveCells(lists.dtm50[i] || null, 'group-dtm50', true),
             ];
             rows.push({ rank: i + 1, cells });
         }
@@ -314,11 +317,7 @@ const Tablebase = (() => {
         _lastVariant = variant;
         if (_isComplete(data)) _resultCache.set(_cacheKey(fen, variant), data);
 
-        const movesDtz   = data.moves_dtz   || [];
-        const movesDtc   = data.moves_dtc   || [];
-        const movesDtm   = data.moves_dtm   || [];
-        const movesDtm50 = data.moves_dtm50 || [];
-        const rows = _rowsState(movesDtz, movesDtc, movesDtm, movesDtm50);
+        const rows = _rowsState(_moveLists(data));
         const maxRows = rows.length;
 
         _publish({
@@ -384,10 +383,24 @@ const Tablebase = (() => {
         }
     }
 
-    async function _probeStream(fen, variant, signal) {
+    // Publishes a progress update only when what is shown would change - the
+    // server can emit several events that round to the same label.
+    function _publishProgress(evtData) {
+        const hasTotal = evtData.total > 0;
+        const label = hasTotal ? `Probing ${evtData.completed}/${evtData.total}…` : 'Probing…';
+        const prev = _viewState.progress;
+        if (prev.visible && prev.label === label) return;
+        _publish({ progress: { visible: true, pct: hasTotal ? Math.round((evtData.completed / evtData.total) * 100) : 0, label } });
+    }
+
+    // Resolves with the final 'done' event; rejects with the error payload
+    // (a plain { error } object, or an AbortError). `onProgress`, if given,
+    // receives each 'probing' event; `extraHeaders` are merged into the
+    // request (the prefetch path marks itself with X-Prefetch).
+    async function _probeStream(fen, variant, signal, onProgress = null, extraHeaders = null) {
         const response = await fetch('/probe/stream', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...extraHeaders },
             body:    JSON.stringify({ fen, variant }),
             signal,
         });
@@ -397,7 +410,7 @@ const Tablebase = (() => {
         }
         for await (const evtData of _sseEvents(response)) {
             if (evtData.status === 'probing') {
-                _publish({ progress: { visible: true, pct: evtData.total > 0 ? Math.round((evtData.completed / evtData.total) * 100) : 0, label: evtData.total > 0 ? `Probing ${evtData.completed}/${evtData.total}…` : 'Probing…' } });
+                if (onProgress) onProgress(evtData);
             } else if (evtData.status === 'done') {
                 return evtData;
             } else if (evtData.status === 'error') {
@@ -417,11 +430,11 @@ const Tablebase = (() => {
                 _prefetchAttached = true;
                 const waitingOn = _prefetchPromise;
                 _blankResults();
-                _publish({ loading: true, progress: { visible: true, pct: 0, label: 'Probing…' } });
+                _publish({ loading: true, progress: _PROGRESS_STARTED });
                 waitingOn.then(outcome => {
                     _prefetchAttached = false;
                     if (mySeq !== _probeSeq) return;
-                    _publish({ progress: { visible: false, pct: 0, label: '' } });
+                    _publish({ progress: _PROGRESS_IDLE });
                     if (outcome.ok) {
                         _applyResults(outcome.data, fen, variant);
                         _publish({ error: null });
@@ -435,12 +448,6 @@ const Tablebase = (() => {
             _cancelPrefetch();
         }
 
-        if (_prefetchCache.has(key)) {
-            const cached = _prefetchCache.get(key);
-            _prefetchCache.delete(key);
-            _applyCachedResult(cached, fen, variant, mySeq);
-            return;
-        }
         if (_resultCache.has(key)) {
             _applyCachedResult(_resultCache.get(key), fen, variant, mySeq);
             return;
@@ -451,13 +458,13 @@ const Tablebase = (() => {
         const signal       = myController.signal;
 
         _blankResults();
-        _publish({ loading: true, progress: { visible: true, pct: 0, label: 'Probing…' } });
+        _publish({ loading: true, progress: _PROGRESS_STARTED });
 
-        _probeStream(fen, variant, signal)
+        _probeStream(fen, variant, signal, _publishProgress)
             .then(data => {
                 if (mySeq !== _probeSeq) return;
                 if (_currentController === myController) _currentController = null;
-                _publish({ progress: { visible: false, pct: 0, label: '' } });
+                _publish({ progress: _PROGRESS_IDLE });
                 if (data.error) {
                     _reset();
                     _handleError(data, onError);
@@ -470,7 +477,7 @@ const Tablebase = (() => {
                 if (err && err.name === 'AbortError') return;
                 if (mySeq !== _probeSeq) return;
                 if (_currentController === myController) _currentController = null;
-                _publish({ progress: { visible: false, pct: 0, label: '' } });
+                _publish({ progress: _PROGRESS_IDLE });
                 _reset();
                 _handleError(err && err.error ? err : { error: 'Cannot reach backend.' }, onError);
                 console.error('[Tablebase]', err);
@@ -485,11 +492,9 @@ const Tablebase = (() => {
 
     function exportCsv() {
         if (!_lastData) return;
-        const dtz   = _lastData.moves_dtz   || [];
-        const dtc   = _lastData.moves_dtc   || [];
-        const dtm   = _lastData.moves_dtm   || [];
-        const dtm50 = _lastData.moves_dtm50 || [];
-        const rows  = Math.max(dtz.length, dtc.length, dtm.length, dtm50.length);
+        const lists = _moveLists(_lastData);
+        const { dtz, dtc, dtm, dtm50 } = lists;
+        const rows  = _maxRows(lists);
         const lines = [];
         if (_lastFen) lines.push(`[FEN "${_lastFen}"]`);
         lines.push('Rank,DTZ Move,DTZ Plies,DTZ Outcome,DTC Move,DTC Plies,DTC Order,DTC Outcome,DTM Move,DTM Plies,DTM Outcome,DTM50 Move,DTM50 Plies,DTM50 Outcome');
@@ -515,11 +520,12 @@ const Tablebase = (() => {
             ].map(_csvField).join(','));
         }
         const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        a.href = url;
         a.download = 'chesstb_moves.csv';
         a.click();
-        URL.revokeObjectURL(a.href);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     // ── Public API ────────────────────────────────────────────────────────
@@ -534,8 +540,8 @@ const Tablebase = (() => {
 
     function setShowRootRow(show) {
         _showRootRow = !!show;
-        Storage.write(_LS_SHOW_ROOT_ROW, _showRootRow);
-        _publish({ showRootRow: _showRootRow, rootRow: _rootRowState(_lastData, _lastFen) });
+        Storage.write(STORAGE_KEYS.SHOW_ROOT_ROW, _showRootRow);
+        _publish({ rootRow: _rootRowState(_lastData, _lastFen) });
     }
     function getShowRootRow() { return _showRootRow; }
 
@@ -585,32 +591,17 @@ const Tablebase = (() => {
             const key = _cacheKey(childFen, variant);
             if (key === _prefetchKey) return;
             _cancelPrefetch();
-            if (_prefetchCache.has(key) || _resultCache.has(key)) return;
+            if (_resultCache.has(key)) return;
             _prefetchKey = key;
             const run = {};
             _prefetchRun = run;
             _prefetchTimer = setTimeout(() => {
                 const controller = new AbortController();
                 _prefetchController = controller;
-                _prefetchPromise = fetch('/probe/stream', {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Prefetch': '1' },
-                    body:    JSON.stringify({ fen: childFen, variant }),
-                    signal:  controller.signal,
-                })
-                .then(async r => {
-                    if (!r.ok) {
-                        const err = await r.json().catch(() => ({ error: 'Network error.' }));
-                        return { ok: false, error: err };
-                    }
-                    for await (const d of _sseEvents(r)) {
-                        if (d.status === 'done') {
-                            if (_isComplete(d)) _prefetchCache.set(key, d);
-                            return { ok: true, data: d };
-                        }
-                        if (d.status === 'error') return { ok: false, error: d };
-                    }
-                    return { ok: false, error: { error: 'Stream ended unexpectedly.' } };
+                _prefetchPromise = _probeStream(childFen, variant, controller.signal, null, { 'X-Prefetch': '1' })
+                .then(d => {
+                    if (_isComplete(d)) _resultCache.set(key, d);
+                    return { ok: true, data: d };
                 })
                 .catch(err => ({ ok: false, error: err, aborted: err && err.name === 'AbortError' }))
                 .finally(() => {
@@ -670,8 +661,8 @@ const Tablebase = (() => {
         tbody.addEventListener('mouseleave', onMouseleave);
 
         // The pointer may already be sitting over a cell that just
-        // (re)appeared without itself moving - re-check on every render.
-        reapplyHoverAtPointer();
+        // (re)appeared without itself moving - ResultsPanel calls
+        // notifyTableRendered() after every render to re-check.
         _reapplyOnNextRender = reapplyHoverAtPointer;
 
         return () => {

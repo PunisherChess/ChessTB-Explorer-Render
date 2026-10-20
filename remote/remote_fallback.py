@@ -48,7 +48,7 @@ lives in a fresh directory created per process and is removed when the
 ``atexit``, same as ``TB.close()``).
 
 This module does not add any locking of its own around opening a
-not-yet-seen remote material. ``RoutedTablebase`` holds upstream's
+not-yet-seen remote material. ``SourcedTablebase`` holds upstream's
 per-kind lock around ``_find`` whenever a download-mode source is
 configured, so two threads racing to probe the same never-before-seen
 material collapse onto one download. Materials of the same kind serialize
@@ -323,7 +323,7 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
                 self._disk_cache.end_download()
             return local_path
 
-    # --- lifecycle / admin surfaces (reached through RoutedTablebase's
+    # --- lifecycle / admin surfaces (reached through SourcedTablebase's
     #     clear_caches()/cache_stats(), both getattr-guarded so this stays
     #     optional) ---
 

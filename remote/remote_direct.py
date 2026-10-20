@@ -36,7 +36,7 @@ config.py's ``REMOTE_MODE`` selects between them.
 
 Per-material opening
 --------------------
-``RoutedTablebase`` locks first opens per ``(kind, material)`` (see
+``SourcedTablebase`` locks first opens per ``(kind, material)`` (see
 tablebase_opening.py), so the network round trip in ``_find`` for one
 material does not block another material of the same kind.
 """
@@ -55,7 +55,7 @@ __all__ = ["open_tablebase"]
 
 
 class _RemoteTablebase(chesstb.Tablebase):
-    """Resolves tables to HTTP byte-range handles for ``RoutedTablebase``;
+    """Resolves tables to HTTP byte-range handles for ``SourcedTablebase``;
     it is not probed itself.
     """
 
@@ -102,7 +102,7 @@ class _RemoteTablebase(chesstb.Tablebase):
         with self._size_lock:
             if rel_path in self._sizes:
                 return self._sizes[rel_path]
-        # First touch of this material (always under RoutedTablebase's
+        # First touch of this material (always under SourcedTablebase's
         # per-(kind, material) lock, see tablebase_opening.py): one ranged
         # GET for page 0 answers "does it exist", "how big is it", and
         # "here's its header" together, since the header parse about to run
@@ -115,14 +115,14 @@ class _RemoteTablebase(chesstb.Tablebase):
             self._page_cache.put((rel_path, 0), data)
         return size
 
-    # --- lifecycle / admin surfaces (RoutedTablebase reaches these via
+    # --- lifecycle / admin surfaces (SourcedTablebase reaches these via
     #     getattr) ---
 
     def close(self) -> None:
         try:
             super().close()
         finally:
-            # Runs after RoutedTablebase.close() has drained in-flight
+            # Runs after SourcedTablebase.close() has drained in-flight
             # probes and released every table's view. Nested try/finally
             # so the connection pool is still released even if clearing
             # the page cache raises.

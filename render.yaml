@@ -34,8 +34,7 @@ services:
     plan: free
     region: oregon   # Region for the Render service.
 
-    # Matches the GET /health route in app.py: 200 once at least one of
-    # TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING has
+    # Matches the GET /health route in app.py: 200 once TABLEBASE_PATH has
     # opened successfully, 503 ("degraded") otherwise -- so Render won't
     # mark a deploy healthy until a tablebase is actually reachable and
     # probing.
@@ -45,24 +44,13 @@ services:
       # The one setting every deployment genuinely differs on, so it's
       # prompted for here (sync: false) instead of hardcoded. Point this
       # at an http(s):// base URL serving the ChessTB layout remotely
-      # (see README.md "Getting the tablebase files") -- REMOTE_MODE
+      # (see README.md "Getting the tablebase files"), or at several
+      # comma-separated URLs tried left-to-right -- REMOTE_MODE
       # defaults to "direct" in config.py, so nothing is written to
       # Render's (ephemeral, and for a set this size, impractically
       # small and expensive) local disk.
       - key: TABLEBASE_PATH
         sync: false
-
-      # Optional. A separate base URL for 7-8 man positions and for
-      # castling-rights positions, respectively -- see README.md "Getting
-      # the tablebase files" for the recommended layout, which also gets
-      # faster probing on 3-6 man positions. Left empty (the default
-      # here), each falls back to TABLEBASE_PATH. Fill in from the
-      # service's "Environment" tab in the Render Dashboard at any time;
-      # app.py picks up the new value on the next restart.
-      - key: TABLEBASE_PATH_7_8
-        value: ""
-      - key: TABLEBASE_PATH_CASTLING
-        value: ""
 
       # Both generated automatically -- Render fills in a random value
       # at deploy time and stores it as a secret env var. Rotate either

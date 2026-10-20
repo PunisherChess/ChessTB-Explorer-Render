@@ -1,20 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { Tablebase } from '../engine/tablebase.js';
+import { METRICS } from '../engine/constants.js';
 import { initMovesGutterSync } from '../engine/scroll.js';
 import Button from './ui/Button.jsx';
 import Panel from './ui/Panel.jsx';
 import Segmented from './ui/Segmented.jsx';
 
-const METRICS = ['dtz', 'dtc', 'dtm', 'dtm50'];
-const METRIC_LABEL = { dtz: 'DTZ', dtc: 'DTC', dtm: 'DTM', dtm50: 'DTM50' };
-const METRIC_OPTIONS = METRICS.map(m => ({ value: m, label: METRIC_LABEL[m] }));
+const METRIC_IDS = Object.keys(METRICS);
+const METRIC_OPTIONS = METRIC_IDS.map(m => ({ value: m, label: METRICS[m].label }));
+
+// Header text of each metric's score column (default 'Score').
+const SCORE_HEADER = { dtc: 'Score/Order' };
 
 const COLUMN_CLASSES = [
     'col-rank',
-    'group-dtz col-move', 'group-dtz col-score',
-    'group-dtc col-move', 'group-dtc col-score',
-    'group-dtm col-move', 'group-dtm col-score',
-    'group-dtm50 col-move', 'group-dtm50 col-score',
+    ...METRIC_IDS.flatMap(m => [`group-${m} col-move`, `group-${m} col-score`]),
 ];
 
 function MetricColGroup() {
@@ -35,8 +35,8 @@ function DotIcon({ prefix }) {
     );
 }
 
-function Cell({ cell, idx }) {
-    const props = { key: idx, className: cell.className };
+function Cell({ cell }) {
+    const props = { className: cell.className };
     if (cell.title) props.title = cell.title;
     if (cell.headers) props.headers = cell.headers;
     if (cell.interactive) {
@@ -59,15 +59,14 @@ function Cell({ cell, idx }) {
     return <td {...props}>{cell.text}</td>;
 }
 
-function AutoplayButton({ metric, explorer }) {
-    const { autoplayMetric, autoplayAvailability, actions } = explorer;
+function AutoplayButton({ metric, autoplayMetric, autoplayAvailability, actions }) {
     const info = autoplayAvailability[metric];
     const isPlaying = autoplayMetric === metric;
     return (
         <button id={`autoplay-btn-${metric}`} className={`btn btn--col-autoplay${isPlaying ? ' is-playing' : ''}`}
                 disabled={info.disabled}
-                title={isPlaying ? `Stop ${METRIC_LABEL[metric]} auto-play` : info.title}
-                aria-label={`Auto-play best ${METRIC_LABEL[metric]} move`}
+                title={isPlaying ? `Stop ${METRICS[metric].label} auto-play` : info.title}
+                aria-label={`Auto-play best ${METRICS[metric].label} move`}
                 onClick={() => actions.toggleAutoPlay(metric)}>
             <svg className="autoplay-icon autoplay-icon--play" viewBox="0 0 12 12" aria-hidden="true">
                 <path d="M3 2.1 L9.6 6 L3 9.9 Z" />
@@ -79,15 +78,10 @@ function AutoplayButton({ metric, explorer }) {
     );
 }
 
-export default function ResultsPanel({ explorer }) {
-    const { tb, activeMetric, actions } = explorer;
+function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autoplayAvailability, actions }) {
     const tbodyRef = useRef(null);
-    const cleanupRef = useRef(null);
 
-    useEffect(() => {
-        cleanupRef.current = Tablebase.attachTableEvents(tbodyRef.current);
-        return () => cleanupRef.current?.();
-    }, []);
+    useEffect(() => Tablebase.attachTableEvents(tbodyRef.current), []);
 
     useEffect(() => initMovesGutterSync(), []);
 
@@ -110,13 +104,13 @@ export default function ResultsPanel({ explorer }) {
             end={
                 <>
                     <span id="move-count" className="panel-header__count" aria-live="polite" aria-atomic="true">{tb.moveCount}</span>
-                    <Button id="export-btn" compact iconOnly icon="download" title="Download move table as CSV" onClick={() => actions.exportCsv()}>CSV</Button>
+                    <Button id="export-btn" compact iconOnly icon="download" title="Download move table as CSV" onClick={actions.exportCsv}>CSV</Button>
                 </>
             }
         >
             <Segmented
                 className="metric-tabs" itemClassName="metric-tab" variant="tabs" label="Tablebase metric"
-                options={METRIC_OPTIONS} value={activeMetric} onChange={actions.setActiveMetric}
+                options={METRIC_OPTIONS} value={activeMetric} onChange={setActiveMetric}
             />
 
             <div className="moves-view">
@@ -126,29 +120,25 @@ export default function ResultsPanel({ explorer }) {
                         <thead>
                             <tr className="group-row">
                                 <th></th>
-                                {METRICS.map(m => (
+                                {METRIC_IDS.map(m => (
                                     <th key={m} id={`th-${m}-grp`} className={`group-${m}`} colSpan={2}>
                                         <span className="group-row-inner">
-                                            <span className="group-label">{METRIC_LABEL[m]}</span>
-                                            <AutoplayButton metric={m} explorer={explorer} />
+                                            <span className="group-label">{METRICS[m].label}</span>
+                                            <AutoplayButton metric={m} autoplayMetric={autoplayMetric} autoplayAvailability={autoplayAvailability} actions={actions} />
                                         </span>
                                     </th>
                                 ))}
                             </tr>
                             <tr className="col-row">
                                 <th id="th-rank" className="col-rank" scope="col" aria-label="Rank">#</th>
-                                <th id="th-dtz-move" className="group-dtz col-move" scope="col">Move</th>
-                                <th id="th-dtz-score" className="group-dtz col-score" scope="col">Score</th>
-                                <th id="th-dtc-move" className="group-dtc col-move" scope="col">Move</th>
-                                <th id="th-dtc-score" className="group-dtc col-score" scope="col">Score/Order</th>
-                                <th id="th-dtm-move" className="group-dtm col-move" scope="col">Move</th>
-                                <th id="th-dtm-score" className="group-dtm col-score" scope="col">Score</th>
-                                <th id="th-dtm50-move" className="group-dtm50 col-move" scope="col">Move</th>
-                                <th id="th-dtm50-score" className="group-dtm50 col-score" scope="col">Score</th>
+                                {METRIC_IDS.flatMap(m => [
+                                    <th key={`${m}-move`} id={`th-${m}-move`} className={`group-${m} col-move`} scope="col">Move</th>,
+                                    <th key={`${m}-score`} id={`th-${m}-score`} className={`group-${m} col-score`} scope="col">{SCORE_HEADER[m] ?? 'Score'}</th>,
+                                ])}
                             </tr>
                             <tr id="root-row" className={`root-row${tb.rootRow ? '' : ' is-hidden'}`}>
                                 <td className="col-rank"></td>
-                                {(tb.rootRow?.cells ?? []).map((cell, idx) => <Cell key={idx} cell={cell} idx={idx} />)}
+                                {(tb.rootRow?.cells ?? []).map((cell, idx) => <Cell key={idx} cell={cell} />)}
                             </tr>
                         </thead>
                     </table>
@@ -166,7 +156,7 @@ export default function ResultsPanel({ explorer }) {
                             {tb.rows.map(row => (
                                 <tr key={row.rank}>
                                     <td className="col-rank" headers="th-rank">{row.rank}</td>
-                                    {row.cells.map((cell, idx) => <Cell key={idx} cell={cell} idx={idx} />)}
+                                    {row.cells.map((cell, idx) => <Cell key={idx} cell={cell} />)}
                                 </tr>
                             ))}
                         </tbody>
@@ -181,3 +171,5 @@ export default function ResultsPanel({ explorer }) {
         </Panel>
     );
 }
+
+export default memo(ResultsPanel);

@@ -1,26 +1,27 @@
-import { useEffect, useRef } from 'react';
-import { formatAutoPlayDelay } from '../hooks/useExplorer.js';
+import { memo, useEffect, useRef } from 'react';
+import { VARIANTS, AUTOPLAY_DELAY, formatAutoPlayDelay } from '../engine/constants.js';
 import Button from './ui/Button.jsx';
 
 const SHORTCUTS = [['Enter', 'Apply'], ['F', 'Flip'], ['C', 'Clear'], ['←', 'Back'], ['→', 'Forward']];
 
-const DELAY_MIN = 0;
-const DELAY_MAX = 2500;
+const { MIN_MS: DELAY_MIN, MAX_MS: DELAY_MAX, STEP_MS: DELAY_STEP } = AUTOPLAY_DELAY;
+const DELAY_TICKS = [DELAY_MIN, DELAY_MAX / 2, DELAY_MAX];
 
-export default function SettingsPanel({ explorer }) {
-    const { settingsOpen, setSettingsOpen, showRootRow, variant, autoplayDelayMs, actions } = explorer;
+function SettingsPanel({ open, setOpen, showRootRow, variant, autoplayDelayMs, actions }) {
     const panelRef = useRef(null);
-    const chess960 = variant === 'chess960';
+    const chess960 = variant === VARIANTS.CHESS960;
 
     useEffect(() => {
-        if (!settingsOpen) return;
+        if (!open) return;
+        // Clicks on the header's settings button are skipped here: the
+        // button toggles the panel itself.
         function onDocClick(e) {
             if (panelRef.current && !panelRef.current.contains(e.target) && !e.target.closest('#settings-btn')) {
-                setSettingsOpen(false);
+                setOpen(false);
             }
         }
         function onKeydown(e) {
-            if (e.key === 'Escape') { e.preventDefault(); setSettingsOpen(false); }
+            if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
         }
         document.addEventListener('click', onDocClick);
         document.addEventListener('keydown', onKeydown);
@@ -28,17 +29,17 @@ export default function SettingsPanel({ explorer }) {
             document.removeEventListener('click', onDocClick);
             document.removeEventListener('keydown', onKeydown);
         };
-    }, [settingsOpen, setSettingsOpen]);
+    }, [open, setOpen]);
 
     const pct = ((autoplayDelayMs - DELAY_MIN) / (DELAY_MAX - DELAY_MIN)) * 100;
 
     return (
-        <div id="settings-panel" ref={panelRef} className={`settings-panel${settingsOpen ? ' is-open' : ''}`}
+        <div id="settings-panel" ref={panelRef} className={`settings-panel${open ? ' is-open' : ''}`}
              role="dialog" aria-modal="false" aria-label="Board settings">
             <div className="settings-panel__header">
                 <span className="settings-panel__title">Board Settings</span>
                 <Button id="settings-close-btn" compact iconOnly icon="close" aria-label="Close settings"
-                        onClick={() => setSettingsOpen(false)} />
+                        onClick={() => setOpen(false)} />
             </div>
 
             <div className="settings-row settings-row--toggle">
@@ -67,12 +68,12 @@ export default function SettingsPanel({ explorer }) {
                 <span className="settings-slider__label">Autoplay Delay</span>
                 <div className="settings-slider__control">
                     <input type="range" id="autoplay-delay-slider" className="range-slider"
-                           min={DELAY_MIN} max={DELAY_MAX} step={50} value={autoplayDelayMs}
+                           min={DELAY_MIN} max={DELAY_MAX} step={DELAY_STEP} value={autoplayDelayMs}
                            style={{ '--range-fill': `${pct}%` }}
                            aria-label="Autoplay delay" aria-valuetext={formatAutoPlayDelay(autoplayDelayMs)}
                            onChange={(e) => actions.setAutoplayDelayAction(parseInt(e.target.value, 10))} />
                     <div className="range-slider__ticks" aria-hidden="true">
-                        <span>0s</span><span>1.25s</span><span>2.5s</span>
+                        {DELAY_TICKS.map(ms => <span key={ms}>{formatAutoPlayDelay(ms)}</span>)}
                     </div>
                 </div>
                 <span className="settings-slider__value" id="autoplay-delay-value">{formatAutoPlayDelay(autoplayDelayMs)}</span>
@@ -89,3 +90,5 @@ export default function SettingsPanel({ explorer }) {
         </div>
     );
 }
+
+export default memo(SettingsPanel);

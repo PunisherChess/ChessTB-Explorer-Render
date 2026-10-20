@@ -20,7 +20,7 @@ export function scrollIntoViewWithin(el, container) {
 // While .moves-body-scroll overflows vertically, its scrollbar narrows the
 // content box. The body table is widened by the scrollbar's measured width
 // so its columns keep the same pixel widths as the header table's.
-export function syncMovesGutter() {
+function syncMovesGutter() {
     const scroller = document.querySelector('.moves-body-scroll');
     if (!scroller) return;
     if (scroller.scrollHeight <= scroller.clientHeight + 1) {
