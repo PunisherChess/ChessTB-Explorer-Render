@@ -31,23 +31,27 @@ move generation/validation, supporting both Standard chess and Chess960
 
 ## Features
 
-- **Interactive board**: drag-and-drop moves, click-to-place pieces from
-  the spare-piece trays, pawn promotion dialog, board flip (orientation
-  persisted locally across visits), undo/redo.
+- **Interactive board**: drag-and-drop board editing, drag-and-drop legal
+  moves while locked, click-to-place pieces from the spare-piece trays,
+  pawn promotion dialog, board flip (orientation persisted locally across
+  visits), undo/redo.
 - **Chess960 (Fischer Random) support**: a **Chess960 Mode** switch in
   the settings panel changes castling interpretation without altering the
-  current board position: dragging a king onto its own rook castles the
-  Chess960 way, and X-FEN/Shredder-FEN rook-file castling-rights letters
-  (e.g. `HAha`) are accepted in the FEN box. Carried through the shared
-  URL (`&variant=chess960`), the saved in-progress game, and PGN
-  import/export (`[Variant "Chess960"]`). Off by default.
-- **Lock**: a padlock button beside the FEN box that restricts board
-  interaction to legal moves only: dragging, click-to-move, and the
-  spare-piece trays are limited to the side to move's legal destinations,
-  and off-board drops are disabled. Unlocked by default; a manual toggle
-  is remembered locally across visits. Auto-play also engages Lock for
-  the duration of a run (unless already locked by hand), and disables the
-  padlock button until the run stops.
+  current board position: dragging a king onto its own rook on a locked
+  board castles the Chess960 way, and X-FEN/Shredder-FEN rook-file
+  castling-rights letters (e.g. `HAha`) are accepted in the FEN box.
+  Carried through the shared URL (`&variant=chess960`), the saved
+  in-progress game, and PGN import/export (`[Variant "Chess960"]`). Off
+  by default.
+- **Lock**: a padlock button beside the FEN box that switches the board
+  between editing and play. While locked, dragging and click-to-move are
+  limited to the side to move's legal moves (castling, en passant, and
+  promotion included), and the spare-piece trays and off-board drops are
+  disabled. While unlocked, the same gestures edit the position and never
+  play a move. Unlocked by default; a manual toggle is remembered locally
+  across visits. Auto-play also engages Lock for the duration of a run
+  (unless already locked by hand), and disables the padlock button until
+  the run stops.
 - **Four ranked move tables side by side**: DTZ, DTC, DTM, and DTM50
   columns, each independently sorted best-move-first (equal moves rank
   an immediate mate first, then by SAN, with promotions in the order
@@ -93,7 +97,7 @@ move generation/validation, supporting both Standard chess and Chess960
 - **Shareable positions**: the FEN (and, in Chess960 Mode, the active
   variant) is written to the URL hash on every move, so a link to the
   page reproduces the exact position and ruleset.
-- **Session persistence**: the in-progress game (not just the position)
+- **Session persistence**: the in-progress game (not only the position)
   survives a trip to the admin dashboard and back.
 - **Board and piece set**: Libre Brown board, CBurnett piece set.
 - **Streaming probes**: `/probe/stream` reports progress via
@@ -417,7 +421,7 @@ life of the process:
   **in full** the first time a probe touches its material and caches it
   in a temporary local directory (bounded by
   `REMOTE_PAGE_CACHE_BYTES` as an on-disk budget, evicting
-  least-recently-used files, removed entirely when the app stops). Every
+  least-recently-used files, removed when the app stops). Every
   probe after the first is then a local mmap read.
 
 `"direct"` is the better default for browsing across many materials, which
@@ -505,7 +509,7 @@ explaining what it does. The table below is the complete reference.
 | `REMOTE_TIMEOUT_SECS`       | `20`              | **Remote tablebase entries only.** Per-HTTP-request timeout for existence/size checks and the download itself. |
 | `REMOTE_MAX_RETRIES`        | `3`               | **Remote tablebase entries only.** Attempts for a single remote request before it's treated as failed. |
 | `REMOTE_POOL_MAXSIZE`       | `None`            | **Remote tablebase entries only.** Size of each remote backend's HTTP connection pool. `None` computes `max(PROBE_THREADS * 2, 20)`. |
-| `PROBE_RATE_LIMIT`          | `"60 per minute"` | Per-client-IP request limit on `/probe` and `/probe/stream`, using [flask-limiter](https://flask-limiter.readthedocs.io/)'s string syntax. Left empty, rate limiting is disabled entirely. See [Security notes](#security-notes). |
+| `PROBE_RATE_LIMIT`          | `"60 per minute"` | Per-client-IP request limit on `/probe` and `/probe/stream`, using [flask-limiter](https://flask-limiter.readthedocs.io/)'s string syntax. Left empty, rate limiting is disabled. See [Security notes](#security-notes). |
 | `ADMIN_LOGIN_RATE_LIMIT`    | `"5 per minute"`  | Per-client-IP request limit on `/admin/login`, same string syntax as `PROBE_RATE_LIMIT`, applied independently of it. Covers both failed and successful login attempts. Left empty, login attempts are not rate limited. See [Security notes](#security-notes). |
 | `PREFETCH_RATE_LIMIT`       | `"30 per minute"` | Per-client-IP request limit for hover prefetch requests marked with `X-Prefetch: 1`. Left empty, prefetch requests share `PROBE_RATE_LIMIT`. See [Security notes](#security-notes). |
 | `TRUSTED_PROXY_COUNT`       | `1` (also readable from a `TRUSTED_PROXY_COUNT` env var) | Number of trusted reverse-proxy hops in front of this app. In production this configures [waitress's own `trusted_proxy_count`](https://docs.pylonsproject.org/projects/waitress/en/stable/proxy-headers.html) (waitress parses `X-Forwarded-For`/`X-Forwarded-Proto` and corrects `REMOTE_ADDR`/`wsgi.url_scheme` itself, ahead of Flask); [Werkzeug's `ProxyFix`](https://werkzeug.palletsprojects.com/en/latest/middleware/proxy_fix/) makes the same correction for the `DEBUG = True` dev-server path, which doesn't run under waitress. Both rate limiters key on the corrected address, and `request.scheme`/`request.is_secure` read the corrected scheme. `1` matches this project's own `render.yaml` topology (Render's edge/load-balancer, once). Set it to match the deployment's reverse-proxy chain, or set it to `0` for a deployment with no reverse proxy in front of it at all. See [Security notes](#security-notes). |
@@ -619,7 +623,7 @@ The service can also be configured manually without the Blueprint file:
      restart.
    - `SESSION_COOKIE_SECURE`: set to `true`. Render always terminates
      TLS at its edge, so the browser reaches this deployment over HTTPS
-     even though the app itself just speaks plain HTTP to Render's
+     even though the app itself speaks plain HTTP to Render's
      proxy; `config.py`'s own default (`false`) is tuned for a local
      plain-HTTP installation instead. (Option 1's `render.yaml` sets
      this automatically - it is a manual step here because Option 2
@@ -666,24 +670,34 @@ means no persistent disk is needed regardless of plan - see
   or randomize a new starting position - it only changes how castling
   moves/rights on the *current* board are interpreted, and drops the
   current move line the same way a board edit does (a line built under
-  one variant isn't reinterpreted as the other). With it on, drag a king
-  onto its own rook to castle; the destination square and resulting rook
-  position follow standard Chess960 rules regardless of where the king
-  and rook started. The setting is carried in the shared URL
-  (`&variant=chess960`), the saved in-progress game, and PGN
-  import/export (a `[Variant "Chess960"]` header).
-- **Edit the board directly**: drag pieces around the board, drag a piece
-  off the board to remove it, or click a spare piece in either tray and
-  then click a square to place it (click again / press `Esc` to cancel).
-  Board edits reset the current move line the same way **Clear** does.
+  one variant isn't reinterpreted as the other). With it on and the board
+  locked, drag a king onto its own rook to castle; the destination
+  square and resulting rook position follow standard Chess960 rules
+  regardless of where the king and rook started. The setting is carried
+  in the shared URL (`&variant=chess960`), the saved in-progress game,
+  and PGN import/export (a `[Variant "Chess960"]` header).
+- **Edit the board directly**: while the board is unlocked, drag pieces
+  around the board, drag a piece off the board to remove it, or click a
+  spare piece in either tray and then click a square to place it (click
+  again / press `Esc` to cancel). Board edits reset the current move line
+  the same way **Clear** does and never play a move, including a drag
+  that would be castling, en passant, or promotion. The side to move,
+  halfmove clock, and fullmove number are unchanged, and castling rights
+  and the en passant square are kept while the edited board still
+  supports them: a castling right is dropped when its king or rook leaves
+  the square it requires, and the en passant square when its pawn is
+  removed or no capture of it remains. A pawn cannot be dragged to the
+  last rank; place the promoted piece from a spare tray instead.
 - **Lock the board**: click the padlock button beside the FEN box to
-  restrict drag-and-drop, click-to-move, and the spare-piece trays to
-  legal moves for the side to move; the button turns gold while active.
-  Click again to unlock. The choice is remembered locally across visits.
-  Starting auto-play locks the board automatically for the run (unless
-  already locked) and disables the padlock button until it stops.
+  play moves on the board. While locked, drag-and-drop and click-to-move
+  accept only legal moves for the side to move (castling, en passant, and
+  promotion included), and the spare-piece trays and off-board drops are
+  disabled; the button turns gold while active. Click again to unlock and
+  edit. The choice is remembered locally across visits. Starting
+  auto-play locks the board automatically for the run (unless already
+  locked) and disables the padlock button until it stops.
 - **Play moves**: click any move in one of the four ranked tables to
-  play it, or drag a piece on the board through a legal move.
+  play it, or lock the board and drag a piece through a legal move.
 - **Navigate history**: the Undo/Redo arrow buttons or `←`/`→`, or click
   any move in the PGN panel to jump straight to that point in the line.
 - **Auto-play**: click the ▶ button above the DTZ, DTC, DTM, or DTM50
@@ -813,7 +827,7 @@ curl -X POST http://127.0.0.1:7860/probe \
   default, `"60 per minute"`, covers normal browsing and
   autoplay at its default delay - raise it if legitimate autoplay at a
   fast delay setting gets throttled, lower it if the deployment sees
-  abuse, or set either limit to `""` to disable it entirely.
+  abuse, or set either limit to `""` to disable it.
   `ADMIN_LOGIN_RATE_LIMIT` defaults to `"5 per minute"`, tight enough to
   slow down repeated `ADMIN_TOKEN` guesses. Both limiters key on
   `request.remote_addr` as corrected by `TRUSTED_PROXY_COUNT` (see
@@ -895,14 +909,15 @@ curl -X POST http://127.0.0.1:7860/probe \
 | Every probe returns "Position not covered by the loaded tablebase." | `TABLEBASE_PATH` is unset or wrong, or none of the `TABLEBASE_PATH` entries carries the position's material, for example a castling-rights position when no entry covers castling tables (see [Getting the tablebase files](#getting-the-tablebase-files)). A single path uses its `full/` and `castling/` subdirectories, so a root with a different layout needs an explicit list. Check the startup log for "TABLEBASE_PATH opened at: ..." (or "opened remotely at: ...") or a warning. |
 | A FEN is rejected with "Invalid castling availability" | The submitted castling-availability field is something other than `-` or a combination of `K`, `Q`, `k`, `q` (or, in Chess960 Mode, rook-file letters `a`-`h`/`A`-`H`), or names a castling right without a matching king and rook on the board. |
 | A FEN with `a`-`h`/`A`-`H` castling-rights letters is rejected even though the position looks fine | Those letters are only accepted with **Chess960 Mode** on (settings panel, or `variant: "chess960"` on the API) - Standard mode only accepts `K`, `Q`, `k`, `q`, matching Standard chess's fixed castling-rook squares. |
-| Dragging a king onto its own rook doesn't castle | **Chess960 Mode** is off - enable it in the settings panel (or send `variant: "chess960"` on the API) for Chess960-style king-onto-rook castling; in Standard mode a king can only reach its rook's square by regular king movement. |
+| Dragging a king onto its own rook doesn't castle | The board is unlocked or **Chess960 Mode** is off. Unlocked drags only edit the position, so lock the board to play moves. Enable Chess960 Mode in the settings panel (or send `variant: "chess960"` on the API) for Chess960-style king-onto-rook castling; in Standard mode a king can only reach its rook's square by regular king movement. |
 | `/health` returns `503 degraded` | The tablebase failed to open - check `TABLEBASE_PATH` and file permissions. |
 | `ModuleNotFoundError: No module named 'chess.chesstb'` | Plain PyPI `chess` was installed instead of the fork. Re-run `pip install -r requirements.txt` and confirm it pulled `chess` from `noobpwnftw/python-chess` (the `add-chesstb-tablebases` branch) rather than plain PyPI `chess` - see the note at the top of `requirements.txt`. |
 | `ModuleNotFoundError: No module named 'config'` | `config.py` is missing from alongside `app.py`. It ships with the repository - if it was deleted or moved, restore it from the repo (or re-clone) and re-apply any edits, such as `TABLEBASE_PATH`. |
 | App logs `Configuration error: ...` and exits immediately | A value in `config.py` is the wrong type or out of range for that setting (e.g. a string where an integer is expected, or a negative cache size) - the error message names which setting and why. Fix it in `config.py` and re-run `python app.py`. |
 | Admin dashboard panels stuck on "Loading…" | Check the browser console for a CSP violation and verify that the app is running and reachable at the `/admin` URL. |
 | A drag, drop, or spare-piece placement on the board is silently rejected | The board is Locked - the padlock button beside the FEN box is highlighted gold. Lock restricts board interaction to legal moves and disables the spare-piece trays and off-board drops; click the padlock again to unlock and edit freely. |
-| Probing feels slow on positions with many legal moves, or doesn't scale with `PROBE_THREADS` | Confirm `lz4` is installed (`pip show lz4`, or `python -c "import lz4"`) - without it, `chess.chesstb`'s block decompression runs in pure Python and holds the GIL, so `PROBE_THREADS` can't achieve real parallelism. `pip install lz4` (already in `requirements.txt`) and restart. Otherwise, tune `PROBE_THREADS`, `PROBE_PARALLEL_THRESHOLD`, and `PROBE_TIMEOUT_SECS` in `config.py`. Note that `tablebase_router.py` guards each material's first open with a lock keyed by `(kind, material)`, so two threads racing to open the *same* never-before-seen material collapse onto one read, while distinct materials of the same kind open concurrently. If any configured tier uses `REMOTE_MODE="download"`, opens fall back to one lock shared per kind, so several distinct never-before-seen materials of that kind then open one at a time instead - either way, this only affects the very first probe against any given material. |
+| A drag moves the piece but does not play a move or change the side to move | The board is unlocked. Unlocked drags edit the position and never play a move; click the padlock button beside the FEN box to lock the board and play legal moves. |
+| Probing feels slow on positions with many legal moves, or doesn't scale with `PROBE_THREADS` | Confirm `lz4` is installed (`pip show lz4`, or `python -c "import lz4"`) - without it, `chess.chesstb`'s block decompression runs in pure Python and holds the GIL, so `PROBE_THREADS` can't achieve real parallelism. `pip install lz4` (already in `requirements.txt`) and restart. Otherwise, tune `PROBE_THREADS`, `PROBE_PARALLEL_THRESHOLD`, and `PROBE_TIMEOUT_SECS` in `config.py`. Note that `tablebase_router.py` guards each material's first open with a lock keyed by `(kind, material)`, so two threads racing to open the *same* never-before-seen material collapse onto one read, while distinct materials of the same kind open concurrently. If any configured tier uses `REMOTE_MODE="download"`, opens fall back to one lock shared per kind, so several distinct never-before-seen materials of that kind then open one at a time instead - either way, this only affects the first probe against any given material. |
 | `ModuleNotFoundError: No module named 'waitress'` | The active environment's dependencies are out of date - re-run `pip install -r requirements.txt` to pick up `waitress`. `app.py` imports it unconditionally at the top of the file, before `config.DEBUG` is even read, so setting `DEBUG = True` does **not** avoid this - waitress has to be installed either way. |
 | Every probe on a remote `TABLEBASE_PATH` returns "Position not covered..." or `/health` is `degraded` | Confirm the URL is reachable and correct (try opening `TABLEBASE_PATH/wdl/KQK.lzw` - or any small material's `.lzw` - directly in a browser). Check the startup log's "TABLEBASE_PATH opened remotely at: ..." line (or a warning in its place) for the actual failure. |
 | A probe occasionally returns `503` with `error_code: "probe_timeout"` | Another concurrent request was already probing the same position and didn't finish within `PROBE_TIMEOUT_SECS`. This is transient and retryable - the original probe has usually landed in the child-probe cache before a retry, so the retry is inexpensive. Frequent occurrences suggest raising `PROBE_TIMEOUT_SECS`, or that a slow remote `TABLEBASE_PATH` is the underlying bottleneck. |

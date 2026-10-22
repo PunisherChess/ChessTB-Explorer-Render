@@ -1,3 +1,5 @@
+/** SettingsPanel.jsx: board settings panel */
+
 import { memo, useEffect, useRef } from 'react';
 import { VARIANTS, AUTOPLAY_DELAY, formatAutoPlayDelay } from '../engine/constants.js';
 import Button from './ui/Button.jsx';

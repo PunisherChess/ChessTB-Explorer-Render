@@ -61,8 +61,8 @@
  * is logically one move. For an ordinary relocation, events.move fires
  * first, then events.change, then movable.events.after (see board.ts's
  * baseMove()/userMove()). events.change carries no orig/dest, so if it won
- * the idempotency race it would take the generic "board edit" branch and
- * leave movable.events.after's orig/dest with nothing left to act on.
+ * the idempotency race it would take the hint-less branch and leave
+ * movable.events.after's orig/dest with nothing left to act on.
  * events.move is therefore the primary handler: it fires before
  * events.change and, unlike movable.events.after, carries orig/dest (plus
  * capture info), so it wins the idempotency race with enough information
@@ -78,10 +78,11 @@ import { Theme }       from './theme.js';
 import * as Storage    from './storage.js';
 
 import { Chess, Castles, castlingSide } from '../vendor/chessops/chess.js';
-import { parseFen, makeFen }       from '../vendor/chessops/fen.js';
+import { parseFen, parseBoardFen, makeFen, makeBoardFen } from '../vendor/chessops/fen.js';
 import { chessgroundDests }        from '../vendor/chessops/compat.js';
 import { parseSan, makeSan }       from '../vendor/chessops/san.js';
 import { parseSquare, makeSquare } from '../vendor/chessops/util.js';
+import { SquareSet }               from '../vendor/chessops/squareSet.js';
 import { VARIANTS, ROOT_ID, METRICS, STORAGE_KEYS, CLEARED_FEN } from './constants.js';
 import { childrenOf }  from './tree.js';
 
@@ -103,9 +104,11 @@ const Board = (() => {
 
     // ── Lock mode ────────────────────────────────────────────────────────────
     // When true, the board only accepts legal moves for the side to move;
-    // spare-piece placement and off-board deletion are disabled. Toggled via
-    // setLocked(). Moves played through the ranked-moves table, auto-play, or
-    // the PGN panel are unaffected, since those are already always legal.
+    // spare-piece placement and off-board deletion are disabled. When false,
+    // board interaction edits the position and never plays a move. Toggled
+    // via setLocked(). Moves played through the ranked-moves table,
+    // auto-play, or the PGN panel are unaffected, since those are already
+    // always legal.
     let _locked = false;
 
     // [orig, dest] of the most recently played/navigated-to move, or
@@ -113,12 +116,12 @@ const Board = (() => {
     // Tracked separately from the move tree because Back/Forward/goToNode
     // land on a node that already has its own from/to squares recorded;
     // this variable is what lets _syncChessground() highlight the right
-    // squares for those navigations too, not just for a freshly played move.
+    // squares for those navigations too, not only for a freshly played move.
     let _lastMoveKeys = undefined;
 
     // ── Undo / redo stacks ────────────────────────────────────────────────────
     // Plain chronological FEN log, used only as a Back/Forward fallback once
-    // navigation walks off the current move tree entirely (e.g. past a board
+    // navigation walks off the current move tree (e.g. past a board
     // edit - edits aren't part of the tree, see _resetMoveLine below). While
     // the current position is inside the tree, goBack()/goForward() use the
     // tree's parent/activeChild pointers instead (see below).
@@ -149,7 +152,7 @@ const Board = (() => {
     // and whichever destination square chessground/chessops reported,
     // never assumed to be a fixed c/g-file square), recorded alongside
     // san/fen so lastMove highlighting works when navigating the tree, not
-    // just on a freshly-played move.
+    // only on a freshly-played move.
     //
     // The PGN panel and PGN export walk this tree recursively so alternate
     // moves are preserved as variations instead of overwriting history.
@@ -255,7 +258,6 @@ const Board = (() => {
     // check/mate determination below is delegated to chessops.
 
     function currentFen() { return makeFen(_position.toSetup()); }
-    function _turnChar(pos) { return pos.turn === 'white' ? 'w' : 'b'; }
 
     function _fenErrorMessage(err) {
         switch (err && err.message) {
@@ -284,7 +286,7 @@ const Board = (() => {
     // syntactically valid but not a legal right - chessops's own parser
     // silently drops it rather than rejecting the FEN (see parseCastlingFen
     // in fen.js), so that has to be checked here by comparing what was
-    // requested against what the constructed position actually granted.
+    // requested against what the constructed position granted.
     // This works the same way for Standard 'KQkq' and Chess960 file-letter
     // rights, since both are resolved by chessops before this comparison;
     // no Standard-only assumption is made about which squares are valid.
@@ -344,7 +346,7 @@ const Board = (() => {
     // Parses and fully validates a FEN into a chessops position under the
     // given variant (defaulting to the currently-active one), or returns a
     // user-facing reason it was rejected. Rejects a syntactically-valid
-    // chessops parse that isn't actually a legal encoding for the
+    // chessops parse that isn't a legal encoding for the
     // requested variant (see the two checks above and the module doc
     // comment) - the same FEN text can be accepted under one variant and
     // rejected under the other.
@@ -385,7 +387,7 @@ const Board = (() => {
     // Total legal move count, counting each underpromotion choice as a
     // separate move (matching the count a full legal-move generator would
     // report) rather than one destination square per promoting pawn move.
-    // Includes Chess960 castling moves - they're just another destination
+    // Includes Chess960 castling moves - they're another destination
     // chessops's own move generation supplies (see chessgroundDests below).
     function _countLegalMoves(pos) {
         const ctx = pos.ctx();
@@ -427,12 +429,11 @@ const Board = (() => {
     // The single point where _position's state is pushed into chessground.
     // Called unconditionally after every position-changing action - even a
     // "legal move" one, since chessground's own baseMove() has no concept of
-    // en passant, promotion, or Chess960 castling and can leave its internal
-    // state briefly chess-wise-incorrect (e.g. not removing the captured
-    // pawn on an en passant capture, leaving a pawn on the back rank instead
-    // of the promoted piece, or leaving the rook wherever it was dragged
-    // from instead of its final castled square) until this call corrects
-    // it. Chessground's internal state is not authoritative;
+    // promotion or Chess960 castling and can leave its internal state
+    // briefly chess-wise-incorrect (e.g. leaving a pawn on the back rank
+    // instead of the promoted piece, or leaving the rook wherever it was
+    // dragged from instead of its final castled square) until this call
+    // corrects it. Chessground's internal state is not authoritative;
     // this call always overwrites it from _position.
     function _syncChessground() {
         if (!cg || !_position) return;
@@ -501,6 +502,42 @@ const Board = (() => {
         _commitPlayedMove(move, source, target);
     }
 
+    // Placement after relocating the piece on `from` to `to`, derived from
+    // _position: chessground removes an enemy pawn beside the origin of any
+    // diagonal pawn move, which a board edit must not do.
+    function _relocatedPlacement(from, to) {
+        const board = _position.board.clone();
+        const piece = board.take(parseSquare(from));
+        if (!piece) return null;
+        board.set(parseSquare(to), piece);
+        return makeBoardFen(board);
+    }
+
+    // Castling rights of the current position that `board` still supports.
+    // A right is dropped when its king or rook has left the squares it
+    // needs: the home squares in Standard mode, the back rank in Chess960.
+    function _retainedCastlingRights(board) {
+        let rights = _position.castles.castlingRights;
+        if (_variant === VARIANTS.STANDARD) {
+            for (const color of ['white', 'black']) {
+                if (board.kingOf(color) !== _HOME_SQUARES[color].king) {
+                    rights = rights.diff(SquareSet.backrank(color));
+                }
+            }
+        }
+        return Castles.fromSetup({ board, castlingRights: rights }).castlingRights;
+    }
+
+    // FEN of `placement` with the current turn, clocks, retained castling
+    // rights, and en passant square. An en passant square the edited board
+    // cannot support is dropped when the position is built.
+    function _editedFen(placement) {
+        const parsed = parseBoardFen(placement);
+        if (parsed.isErr) return null;
+        const board = parsed.value;
+        return makeFen({ ..._position.toSetup(), board, castlingRights: _retainedCastlingRights(board) });
+    }
+
     // ── Core sync algorithm ──────────────────────────────────────────────────
     // Chessground fires multiple, differently-scoped callbacks for what a
     // user experiences as a single action (events.move, events.change,
@@ -517,8 +554,8 @@ const Board = (() => {
     // then movable.events.after (scheduled later by userMove()) - all via
     // setTimeout(fn,1), so same-delay-timer FIFO ordering makes this
     // deterministic. events.change carries no orig/dest, so if it were the
-    // informative hook it would always take the generic "board edit" branch
-    // below first, leaving movable.events.after's real orig/dest with
+    // informative hook it would always take the hint-less branch below
+    // first, leaving movable.events.after's real orig/dest with
     // nothing left to act on once it fires - the idempotency guard would
     // already see the position as synced. events.move fires before
     // events.change and, unlike movable.events.after, carries orig/dest
@@ -531,11 +568,21 @@ const Board = (() => {
     //
     // Standard mode accepts only the orthodox king-destination castle;
     // Chess960 accepts the king-to-rook representation.
+    //
+    // While locked, a relocation is played when legal and reverted
+    // otherwise. While unlocked, every change is a board edit and never a
+    // move, including relocations that would be promotion, castling, or en
+    // passant moves.
     function _handleBoardMutation(origHint, destHint) {
         if (!cg || !_position) return;
         const cgPlacement  = cg.getFen();                 // chessground's own current placement-only FEN
         const ourPlacement = currentFen().split(' ')[0];
         if (cgPlacement === ourPlacement) return;          // already synced by another callback this tick
+
+        if (!_locked) {
+            _commitBoardEdit(origHint, destHint, cgPlacement);
+            return;
+        }
 
         if (origHint && destHint) {
             // _position hasn't moved yet at this point - only chessground
@@ -558,19 +605,20 @@ const Board = (() => {
                 _commitPlayedMove(move, origHint, destHint);
                 return;
             }
-            // Not legal - fall through to the generic edit path below, which
-            // reads the placement chessground already committed rather than
-            // origHint/destHint.
         }
+        _syncChessground();   // anything but a legal move is reverted
+    }
 
-        // Board-edit path: spare-piece drop, off-board delete, or an
-        // illegal relocation. Castling rights and the en passant square are
-        // always dropped here because an edited placement's rights can no
-        // longer be assumed valid.
+    // Board edit: spare-piece drop, off-board delete, or relocation. Only
+    // the placement changes; the turn, clocks, and the castling rights and
+    // en passant square the edited board still supports carry over. An
+    // invalid resulting position is reverted.
+    function _commitBoardEdit(origHint, destHint, cgPlacement) {
         const prevFen = currentFen();
-        const nextFen = `${cgPlacement} ${_turnChar(_position)} - - 0 1`;
-        const built = _buildPosition(nextFen);
-        if (!built.ok) { _syncChessground(); return; }   // invalid resulting position - snap back
+        const placement = (origHint && destHint && _relocatedPlacement(origHint, destHint)) || cgPlacement;
+        const nextFen = _editedFen(placement);
+        const built = nextFen && _buildPosition(nextFen);
+        if (!built || !built.ok) { _syncChessground(); return; }
         _commitReplacedPosition(built.pos, prevFen);
     }
 
@@ -596,7 +644,7 @@ const Board = (() => {
         trial.board.set(square, { role, color, promoted: false });
         // Re-derive castling rights from the edited board rather than
         // leaving stale rook/king square references behind (e.g. a right
-        // pointing at a square this edit just overwrote).
+        // pointing at a square this edit overwrote).
         trial.castles = Castles.fromSetup({ board: trial.board, castlingRights: _position.castles.castlingRights });
         const nextFen = makeFen(trial.toSetup());
         if (nextFen === prevFen) return;   // identity placement (e.g. re-placing the same piece already there) - nothing to record
@@ -711,7 +759,7 @@ const Board = (() => {
     // takes precedence over any caller-independent default - callers that
     // already know the intended variant (a URL share-link, a restored saved
     // game) pass it explicitly so the position below is constructed under
-    // the correct ruleset context from the very first render, per this
+    // the correct ruleset context from the first render, per this
     // file's variant-before-position invariant. Omitted or invalid values
     // fall back to Standard.
     function init(onPositionChange, initialFen, variant) {
@@ -767,8 +815,8 @@ const Board = (() => {
             animation:            { enabled: true, duration: 200 },
             movable: {
                 // Any drag is provisionally accepted here and classified
-                // afterward by _handleBoardMutation, rather than gating
-                // drags up front with a separate edit-mode toggle.
+                // afterward by _handleBoardMutation (a move while locked,
+                // an edit otherwise).
                 free:  true,
                 color: 'both',
                 showDests: true,
@@ -909,7 +957,7 @@ const Board = (() => {
         if (_locked) setClickPlacePiece(null);   // drop any armed spare piece
         document.querySelectorAll('.spare-tray').forEach(el => {
             el.classList.toggle('is-locked', _locked);
-            if (_locked) el.setAttribute('title', 'Board is locked');
+            if (_locked) el.setAttribute('title', 'Play mode: unlock to place pieces');
             else el.removeAttribute('title');
         });
         if (persist) Storage.write(STORAGE_KEYS.LOCKED, _locked);
@@ -931,7 +979,7 @@ const Board = (() => {
         // position" case) - so unlike every other _buildPosition() call in
         // this file, failure here must not fall back to a default
         // position or otherwise change what's on the board: the position
-        // simply isn't representable under the requested variant's
+        // isn't representable under the requested variant's
         // castling rules (e.g. Chess960-only castling rights present, or
         // Chess960 castling rights on non-home squares - see
         // _nonOrthodoxCastlingRights), and the switch is refused outright,
@@ -1054,7 +1102,7 @@ const Board = (() => {
             _history.push(currentFen());
             _position = built.pos;
             _lastMoveKeys = undefined;
-            // Mirrors the goBack() fallback above: the position just loaded
+            // Mirrors the goBack() fallback above: the position loaded
             // isn't described by the current (already-reset) tree either, so
             // restart the tree here too and preserve any remaining redo
             // entries across the reset.
@@ -1073,12 +1121,12 @@ const Board = (() => {
     }
 
     // goToNode() jumps to an arbitrary node in the current move tree (used
-    // by the PGN panel - including variation moves, not just the main line).
+    // by the PGN panel - including variation moves, not only the main line).
     // Unlike setPosition(), this never calls _resetMoveLine(). targetId ===
     // ROOT_ID (-1) means "start of the tree" (the position before any move was
     // played). Clicking any node marks it - and every ancestor on the path
     // to it - as its parent's activeChild, so Forward continues along
-    // whichever branch was just brought into view.
+    // whichever branch was brought into view.
     function goToNode(targetId) {
         if (targetId !== ROOT_ID && !_nodes[targetId]) return false;
         if (targetId === _currentId) return true;
@@ -1118,7 +1166,7 @@ const Board = (() => {
     // and only ever lists children/activeChild with a strictly larger one,
     // so parentId chains and children references can never cycle or dangle.
     // Persisted state coming back out of localStorage bypasses that
-    // construction path entirely; this re-checks the same invariant before
+    // construction path; this re-checks the same invariant before
     // trusting it, since violating it would let goToNode()'s parentId walk
     // (or moveLine.js's tree walk) loop forever or index past the array.
     function _isValidNodeRef(id, nodesLength) {
@@ -1162,7 +1210,7 @@ const Board = (() => {
         const built = _buildPosition(loadFen);
         if (!built.ok) {
             // Saved state doesn't parse (e.g. corrupted storage) - fall back
-            // to just the start position with an empty tree.
+            // to the start position with an empty tree.
             const fallback = _buildPosition(startFen);
             _position = fallback.ok ? fallback.pos : Chess.default();
             _startFen         = currentFen();

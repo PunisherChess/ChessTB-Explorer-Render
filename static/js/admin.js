@@ -53,7 +53,7 @@ async function logout() {
   }
 }
 
-// A brand-new or just-cleared cache has 0 hits and 0 misses, and a
+// A brand-new or cleared cache has 0 hits and 0 misses, and a
 // misconfigured one can have maxsize 0 - both make the ratios below NaN
 // or Infinity rather than a real percentage.
 function _pct(value) {

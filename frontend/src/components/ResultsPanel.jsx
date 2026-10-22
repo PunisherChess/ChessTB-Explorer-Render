@@ -1,3 +1,5 @@
+/** ResultsPanel.jsx: ranked move tables for DTZ, DTC, DTM, and DTM50 */
+
 import { memo, useEffect, useRef } from 'react';
 import { Tablebase } from '../engine/tablebase.js';
 import { METRICS } from '../engine/constants.js';

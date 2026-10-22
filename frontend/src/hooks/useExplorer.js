@@ -1,3 +1,5 @@
+/** useExplorer.js: explorer state, FEN box, PGN, auto-play, settings, and keyboard shortcuts */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Board } from '../engine/board.js';
 import { Tablebase } from '../engine/tablebase.js';
@@ -412,7 +414,7 @@ export function useExplorer() {
             exportCsv: Tablebase.exportCsv,
         });
 
-        // Very first probe of the session runs immediately (no debounce).
+        // First probe of the session runs immediately (no debounce).
         onPositionChange(Board.currentFen(), true);
     }, [toast]);
 

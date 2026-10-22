@@ -173,10 +173,10 @@ BLOCK_CACHE_BYTES = 64 * 1024 * 1024
 
 # How a remote table's bytes reach the prober:
 #
-#   "direct"   -- probe the remote tables in place, fetching only the
+#   "direct":     probe the remote tables in place, fetching only the
 #                 page-sized byte ranges each probe reads, nothing written
 #                 to disk (remote/remote_direct.py).
-#   "download" -- fetch each table file in full on first touch and cache it
+#   "download":   fetch each table file in full on first touch and cache it
 #                 on local disk (remote/remote_fallback.py). Slower first
 #                 touch of a material and real disk usage, but every read
 #                 after it is a local mmap read.
@@ -204,7 +204,7 @@ REMOTE_PAGE_CACHE_BYTES = 128 * 1024 * 1024
 
 # Size, in bytes, of one page. In "direct" mode this is the granularity of
 # every fetch, so it sets the trade between over-fetching (too large) and
-# many round trips per probe (too small) -- 256 KiB keeps a table's whole
+# many round trips per probe (too small) - 256 KiB keeps a table's whole
 # header + index region within a page or two, which is what makes later
 # probes of the same table cheap. In "download" mode it is only the chunk
 # size used while streaming a full file down, and has no effect on which
@@ -236,7 +236,7 @@ REMOTE_POOL_MAXSIZE = None
 # can be combined with ";"). Backed by an in-process memory store, which
 # is enough for a single-container deployment (e.g. one Render Web
 # Service instance) but does not share state across multiple replicas.
-# Left empty, rate limiting is disabled entirely.
+# Left empty, rate limiting is disabled.
 #
 # 60 per minute comfortably covers normal browsing and autoplay at its
 # default 1.25s delay; raise it if legitimate autoplay at a fast delay
@@ -246,7 +246,7 @@ PROBE_RATE_LIMIT = "60 per minute"
 # Per-client-IP limit applied only to requests that identify themselves as
 # background hover-prefetch via the "X-Prefetch: 1" request header (see
 # frontend/src/engine/tablebase.js's hover-prefetch). Deliberately separate from,
-# and tighter than, PROBE_RATE_LIMIT -- a client-supplied header is not
+# and tighter than, PROBE_RATE_LIMIT - a client-supplied header is not
 # trusted enough to exempt a request from limiting altogether (any
 # client could tag every request "prefetch" to bypass PROBE_RATE_LIMIT),
 # only to route it to its own, smaller budget, so a sustained hover sweep
@@ -260,14 +260,14 @@ PREFETCH_RATE_LIMIT = "30 per minute"
 # same string syntax as PROBE_RATE_LIMIT above and backed by the same
 # in-process memory store. Separate from PROBE_RATE_LIMIT because
 # /admin/login is a brute-forceable shared-secret check, not a CPU-bound
-# probe -- it needs a tighter limit than "comfortably covers normal
+# probe - it needs a tighter limit than "comfortably covers normal
 # browsing" calls for. Applies to both failed and successful login
 # attempts. Left empty, login attempts are not rate limited at all.
 ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 
 # Number of trusted reverse-proxy hops in front of this application.
 # PROBE_RATE_LIMIT and ADMIN_LOGIN_RATE_LIMIT above both key on the
-# client's IP address (request.remote_addr) -- behind a reverse proxy
+# client's IP address (request.remote_addr) - behind a reverse proxy
 # that's the proxy's own address unless it's corrected for, which would
 # collapse every client behind that proxy onto one shared rate-limit key.
 # The same trusted-hop count also governs whether X-Forwarded-Proto is
@@ -276,8 +276,8 @@ ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 # rather than at this app itself.
 #
 # In production (DEBUG = False), app.py passes this to waitress's own
-# trusted_proxy_count, since waitress -- the actual production WSGI
-# server -- parses X-Forwarded-For/X-Forwarded-Proto and corrects
+# trusted_proxy_count, since waitress - the actual production WSGI
+# server - parses X-Forwarded-For/X-Forwarded-Proto and corrects
 # REMOTE_ADDR/wsgi.url_scheme itself, before Flask ever sees the request.
 # app.py also applies Werkzeug's ProxyFix with the same count, which
 # makes the equivalent correction for the DEBUG = True Flask-dev-server
@@ -287,8 +287,8 @@ ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 # 1 is correct for this project's own render.yaml / "Deploying to Render"
 # topology: Render's platform edge/load-balancer sits in front of a web
 # service exactly once. Increase it when an additional reverse proxy is
-# present in front of the service. Set to 0 when no reverse proxy is present
-# -- a value that does not match the actual proxy chain
+# present in front of the service. Set to 0 when no reverse proxy is present;
+# a value that does not match the actual proxy chain
 # leaves the rate limiter keying on the wrong address (or the scheme
 # misdetected), or (set too high for no proxy at all) trusting a
 # client-supplied X-Forwarded-For/X-Forwarded-Proto header directly,
@@ -318,12 +318,12 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
 
 # Whether the admin session cookie set by /admin/login requires HTTPS.
-# Independent of DEBUG above -- DEBUG is a development/runtime behavior
+# Independent of DEBUG above - DEBUG is a development/runtime behavior
 # switch, not a reliable indicator of the deployment's transport security,
 # so a deployment can legitimately run DEBUG=False (production-like
 # behavior) while still being served over plain HTTP. Leaving this True
 # for such a deployment sets the cookie Secure, which a browser then
-# won't send back over a plain HTTP connection -- /admin/login would
+# won't send back over a plain HTTP connection - /admin/login would
 # appear to succeed while every subsequent authenticated /admin/* request
 # came back 401.
 #
@@ -332,8 +332,8 @@ FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
 # "true" explicitly) can configure it without editing this file. Defaults
 # to False (via SESSION_COOKIE_SECURE unset or anything other than
 # "true") because that's what a local installation needs (README.md's
-# "Installation"): `python app.py` served over http://127.0.0.1:7860 --
-# plain HTTP -- after editing only TABLEBASE_PATH above, with DEBUG and
+# "Installation"): `python app.py` served over http://127.0.0.1:7860,
+# plain HTTP, after editing only TABLEBASE_PATH above, with DEBUG and
 # this setting both left at their defaults.
 #
 # Set this to "true" for any deployment the browser reaches over HTTPS,
@@ -345,7 +345,7 @@ SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").strip()
 # ── Links ────────────────────────────────────────────────────────────────────
 
 # Repository URL for the GitHub button shown in the header of every page.
-# Left empty, the button is omitted entirely. Also readable from a
+# Left empty, the button is omitted. Also readable from a
 # GITHUB_URL environment variable (falling back to the literal string
 # below when unset), so a platform deployment can set it from its own
 # dashboard without a commit - see render.yaml.

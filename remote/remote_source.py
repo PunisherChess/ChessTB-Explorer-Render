@@ -1,15 +1,15 @@
-"""Random-access byte source for chesstb tables served over plain HTTP,
-via ``Range`` requests, instead of a local filesystem.
+"""remote_source.py: random-access byte source for chesstb tables served over
+plain HTTP via ``Range`` requests, instead of a local filesystem.
 
-This module has no chesstb-specific logic of its own -- it's a generic
-HTTP byte-range client -- and lives in remote/ as shared infrastructure
+This module has no chesstb-specific logic of its own - it's a generic
+HTTP byte-range client - and lives in remote/ as shared infrastructure
 for remote (URL) ``TABLEBASE_PATH`` support, used by both remote backends
 tablebase_router can select via ``config.REMOTE_MODE`` (see each file's module
 docstring for its own design):
 
 * remote/remote_direct.py ("direct", the default) resolves tables to
   :class:`RemoteFile` handles; tablebase_router reads them through
-  :class:`RemoteFileView` below so only the byte ranges a probe actually
+  :class:`RemoteFileView` below so only the byte ranges a probe
   touches are ever fetched.
 * remote/remote_fallback.py ("download") downloads each table file in
   full on first touch and disk-caches it, using only
@@ -18,7 +18,7 @@ docstring for its own design):
 
 Design
 ------
-* :class:`RemoteHTTPClient` -- a thin ``requests.Session`` wrapper that
+* :class:`RemoteHTTPClient` - a thin ``requests.Session`` wrapper that
   knows how to ask "does `<base_url>/<path>` exist, and how big is it?"
   and "give me bytes [offset, offset+length) of `<base_url>/<path>`", and
   keeps a running count of every HTTP request it issues and every
@@ -30,14 +30,14 @@ Design
   set from ``PROBE_THREADS``) so concurrent requests reuse warm
   connections instead of opening fresh ones once the default pool is
   exhausted, and its retry loop backs off
-  between attempts -- honoring a ``Retry-After`` header when the server
-  sends one -- rather than retrying instantly into a struggling or
+  between attempts - honoring a ``Retry-After`` header when the server
+  sends one - rather than retrying instantly into a struggling or
   rate-limiting CDN edge.
-* :class:`_PageCache` -- a sharded LRU cache, shared by every table opened
+* :class:`_PageCache` - a sharded LRU cache, shared by every table opened
   against one remote base URL, of fixed-size raw page fetches. A page's
-  key is hashed to one of a fixed number of independent shards -- each
+  key is hashed to one of a fixed number of independent shards - each
   with its own lock, LRU ledger, per-key fetch lock, and slice of the
-  overall byte budget -- so concurrent reads of pages that land in
+  overall byte budget - so concurrent reads of pages that land in
   different shards never contend on a single mutex. This is what makes
   the hot path fast: a table's index structures (consulted on every
   single probe) do many small, scattered reads clustered in a fairly
@@ -46,17 +46,17 @@ Design
   is served with no network round trip at all. Each shard also tracks its
   own hit/miss counts, summed by :attr:`_PageCache.hits` /
   :attr:`_PageCache.misses` for the whole cache.
-* :class:`RemoteFile` -- one opened remote table (fixed client + path +
+* :class:`RemoteFile` - one opened remote table (fixed client + path +
   size), with a ``read(offset, length)`` that satisfies a request from
   the shared page cache, fetching only whichever pages aren't already
   resident.
-* :class:`RemoteFileView` -- a lightweight ``(RemoteFile, base, length)``
+* :class:`RemoteFileView` - a lightweight ``(RemoteFile, base, length)``
   view supporting the same slicing/indexing a local
-  ``memoryview(mmap(...))`` buffer would. Slicing a view is free -- it
+  ``memoryview(mmap(...))`` buffer would. Slicing a view is free - it
   never touches the network; it narrows the (base, length) window.
   Only an explicit materialisation (``bytes(view)``, iterating it, or
   indexing a single byte) triggers a fetch, and only for the span
-  actually needed. This is what tablebase_router's file classes read through
+  needed. This is what tablebase_router's file classes read through
   in "direct" mode.
 """
 from __future__ import annotations
@@ -89,7 +89,7 @@ __all__ = [
 
 #: Size of one page fetched/cached at a time. Large enough that a table's
 #: whole header + index-vector region (dict, MonoUintVec/Min0UintVec
-#: offsets -- everything but the bulk compressed data) typically fits in
+#: offsets - everything but the bulk compressed data) typically fits in
 #: one or two pages, small enough that a single cold random probe doesn't
 #: pull down an unreasonable amount of unrelated data.
 DEFAULT_PAGE_SIZE = 256 * 1024  # 256 KiB
@@ -102,8 +102,8 @@ DEFAULT_PAGE_CACHE_BYTES = 128 * 1024 * 1024  # 128 MiB
 #: Number of independent shards the page cache splits its keyspace
 #: across. Each shard gets its own lock and an equal slice of
 #: DEFAULT_PAGE_CACHE_BYTES, so concurrent probe threads reading
-#: different pages -- the common case once a session has more than a
-#: handful of materials open -- don't serialize behind one mutex.
+#: different pages - the common case once a session has more than a
+#: handful of materials open - don't serialize behind one mutex.
 DEFAULT_PAGE_CACHE_SHARDS = 16
 
 DEFAULT_TIMEOUT = 20.0
@@ -115,20 +115,20 @@ DEFAULT_MAX_RETRIES = 3
 #: host gets its own pool of this size: the resolver and the signed CDN host.
 DEFAULT_POOL_MAXSIZE = 20
 
-#: Cap (seconds) on the exponential backoff between retried requests --
+#: Cap (seconds) on the exponential backoff between retried requests;
 #: see :func:`_retry_delay`.
 _MAX_RETRY_DELAY = 4.0
 
 #: Status codes worth backing off before retrying: 429 (rate limited) and
 #: the transient gateway/server errors a CDN edge or origin can return
-#: under load. 404 and other 4xx codes are not included -- those mean the
+#: under load. 404 and other 4xx codes are not included - those mean the
 #: request itself won't succeed on retry, so there's nothing to wait for.
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def looks_like_remote(directory: str) -> bool:
     """True if `directory` (the value the app would otherwise treat as a
-    local ``TABLEBASE_PATH``) is actually an ``http(s)://`` base URL --
+    local ``TABLEBASE_PATH``) is an ``http(s)://`` base URL,
     e.g. a Hugging Face bucket such as
     ``https://huggingface.co/buckets/<owner>/<name>/resolve``."""
     return bool(directory) and directory.startswith(("http://", "https://"))
@@ -230,7 +230,7 @@ class _PageCache:
     A page's ``(path, page_index)`` key is hashed to one of
     :data:`DEFAULT_PAGE_CACHE_SHARDS` independent :class:`_PageCacheShard`
     instances, each owning its own lock, LRU ledger, per-key fetch locks,
-    and an equal slice of the overall byte budget -- so a given key always
+    and an equal slice of the overall byte budget - so a given key always
     lands on the same shard (its cache entry and its fetch lock are always
     found together), and reads or writes to pages in different shards
     never contend on a shared mutex. ``max_bytes``, ``cur_bytes``,
@@ -285,7 +285,7 @@ class _PageCache:
 class RemoteHTTPClient:
     """Ranged-GET / existence-check client for one remote base URL, with a
     running count of every HTTP request it issues and every response byte
-    it receives -- see :meth:`stats`."""
+    it receives - see :meth:`stats`."""
 
     def __init__(self, base_url: str, *, timeout: float = DEFAULT_TIMEOUT,
                  max_retries: int = DEFAULT_MAX_RETRIES,
@@ -317,15 +317,15 @@ class RemoteHTTPClient:
         self._resolved: Dict[str, Tuple[str, float]] = {}
 
     def _record(self, nbytes: int = 0) -> None:
-        """Count one HTTP round trip -- successful or not -- and however
-        many response body bytes it actually carried."""
+        """Count one HTTP round trip - successful or not - and however
+        many response body bytes it carried."""
         with self._stats_lock:
             self._requests += 1
             self._bytes_fetched += nbytes
 
     def close(self) -> None:
         """Release the session's connection pool. Safe to call more than
-        once -- ``requests.Session.close()`` itself is idempotent."""
+        once - ``requests.Session.close()`` itself is idempotent."""
         self._session.close()
         with self._resolve_lock:
             self._resolved.clear()
@@ -395,7 +395,7 @@ class RemoteHTTPClient:
             except requests.RequestException:
                 resp = None  # fall through to the ranged-GET probe below
             if resp is not None:
-                self._record()  # HEAD has no body -- nothing to add to bytes_fetched
+                self._record()  # HEAD has no body - nothing to add to bytes_fetched
                 if resp.status_code == 404:
                     return None
                 if resp.status_code < 400:
@@ -420,7 +420,7 @@ class RemoteHTTPClient:
                 total = content_range.rsplit("/", 1)[-1] if "/" in content_range else ""
                 if total.isdigit():
                     return int(total)
-                # Unknown ("*") or unparsable total -- this method is the
+                # Unknown ("*") or unparsable total - this method is the
                 # size-of-last-resort probe (see get_first_page()'s copy
                 # of this same situation, which falls back to this
                 # method), so there's nowhere further to fall back to.
@@ -453,8 +453,8 @@ class RemoteHTTPClient:
                 self._record()
                 # Normalised to RemoteSourceError immediately (rather than
                 # storing the raw requests exception) so every caller up
-                # the stack -- CompositeTablebase._find()'s fallback walk,
-                # the Flask routes' 502 mapping -- only ever has to catch
+                # the stack - CompositeTablebase._find()'s fallback walk,
+                # the Flask routes' 502 mapping - only ever has to catch
                 # one exception family for a transport failure, the same
                 # one already used for a bad HTTP status below.
                 last_exc = RemoteSourceError(f"Failed to reach {url}: {exc}")
@@ -466,9 +466,9 @@ class RemoteHTTPClient:
                 self._record(len(resp.content))
                 return resp.content
             if resp.status_code == 200:
-                # Range not honoured by this server/CDN -- stream=True
+                # Range not honoured by this server/CDN - stream=True
                 # above means the body isn't downloaded yet at this point,
-                # so a declared (or entirely undeclared -- chunked
+                # so a declared (or undeclared - chunked
                 # transfer-encoding, or a server that omits
                 # Content-Length) size can still be checked before
                 # `.content` below pulls it fully into memory. A
@@ -502,7 +502,7 @@ class RemoteHTTPClient:
 
     def get_first_page(self, path: str, page_size: int) -> Tuple[Optional[int], bytes]:
         """Fetch `path`'s first `page_size` bytes, returning
-        ``(total_size, data)`` -- ``total_size`` is ``None`` if `path`
+        ``(total_size, data)`` - ``total_size`` is ``None`` if `path`
         doesn't exist, in which case ``data`` is empty.
 
         This combines existence, size, and header retrieval in one round
@@ -510,7 +510,7 @@ class RemoteHTTPClient:
         initial page is already required for header parsing. The returned
         data is reused for the first page of the remote file. `data` is capped to `page_size` bytes
         even if the server ignores the Range header and returns a whole
-        object no bigger than `page_size` -- a genuinely small file, the
+        object no bigger than `page_size` - a genuinely small file, the
         one case worth still buffering. A larger (or size-unknown, e.g.
         chunked) object coming back whole instead raises
         :class:`RemoteSourceError` rather than buffering it in full; see
@@ -546,7 +546,7 @@ class RemoteHTTPClient:
                     return int(total_str), resp.content[:page_size]
                 # Content-Range's total is "*" (RFC 9110 permits this when
                 # the sender doesn't know the complete representation
-                # length yet) or otherwise unparsable -- either way this
+                # length yet) or otherwise unparsable - either way this
                 # means "exists, size unknown from this response", not
                 # "doesn't exist" (404 already returned above for that).
                 # Caching that distinction matters: the caller
@@ -563,13 +563,13 @@ class RemoteHTTPClient:
                     )
                 return total, resp.content[:page_size]
             if resp.status_code == 200:
-                # Range not honoured -- could be a genuinely tiny file
+                # Range not honoured - could be a genuinely tiny file
                 # (smaller than page_size, the legitimate case the
                 # docstring above describes) or a large-object-ignoring-
                 # Range CDN returning the whole thing from byte 0. As in
                 # get_range(), stream=True above means Content-Length can
                 # be checked before `.content` reads the body, so only the
-                # first, legitimate case actually gets buffered here.
+                # first, legitimate case gets buffered here.
                 cl = resp.headers.get("Content-Length")
                 declared_size = int(cl) if cl is not None and cl.isdigit() else None
                 if declared_size is None or declared_size > page_size:
@@ -643,7 +643,7 @@ class RemoteFile:
             page = self._get_page(page_index)
             page_start = page_index * self.page_size
             # The file's own last page is legitimately shorter than
-            # page_size whenever self.size isn't a multiple of it --
+            # page_size whenever self.size isn't a multiple of it;
             # that's normal, not truncation. expected_page_len is what
             # this page should be regardless, so it's still page_size for
             # every non-final page.
@@ -651,7 +651,7 @@ class RemoteFile:
             start_in_page = cur_offset - page_start
             # max(0, ...): a page shorter than its own expected_page_len
             # (a truncated remote response) would otherwise make
-            # len(page) - start_in_page negative -- Python accepts a
+            # len(page) - start_in_page negative - Python accepts a
             # negative slice bound rather than raising, so without this
             # guard `take` would go negative and cur_offset/remaining
             # would move backward/grow instead of making forward
@@ -663,13 +663,13 @@ class RemoteFile:
                 remaining -= take
             if len(page) < expected_page_len:
                 # This page came back shorter than its own expected
-                # length -- not only take == 0 above, which catches
+                # length - not only take == 0 above, which catches
                 # the case where this page had nothing left to give at
                 # cur_offset's position. A short (but nonempty) page
                 # still needs to stop the read here: every later
                 # iteration's start_in_page assumes cur_offset has
                 # advanced exactly page_size per prior page, which a
-                # short page breaks -- continuing would compute a
+                # short page breaks - continuing would compute a
                 # negative (and silently wrong-but-not-erroring, per the
                 # same slicing behavior above) start_in_page against the
                 # next page. Ending the read here instead mirrors this
@@ -679,7 +679,7 @@ class RemoteFile:
 
     def close(self) -> None:
         # Fetched pages live in the Tablebase-shared page cache, not
-        # here -- nothing owned by this object needs releasing.
+        # here - nothing owned by this object needs releasing.
         pass
 
 

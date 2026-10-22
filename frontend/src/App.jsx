@@ -1,3 +1,5 @@
+/** App.jsx: explorer page layout */
+
 import { useExplorer } from './hooks/useExplorer.js';
 import Header from './components/Header.jsx';
 import FenBar from './components/FenBar.jsx';

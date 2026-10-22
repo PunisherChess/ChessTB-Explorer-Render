@@ -1,3 +1,5 @@
+/** PgnPanel.jsx: move-history panel with PGN import and export buttons */
+
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { parseFenMeta } from '../engine/pgnFormat.js';
 import { buildMoveListItems, buildVariation } from '../engine/moveLine.js';
@@ -44,7 +46,7 @@ function renderItems(items, nodes, rootChildren, currentId, onGoTo, keyPrefix) {
             ];
         }
         // 'variation' marker - expand lazily so nested forks don't need to
-        // be walked until they're actually reached.
+        // be walked until they're reached.
         const varItems = buildVariation(nodes, rootChildren, item.nodeIds, item.whiteToMove, item.moveNum, currentId, item.depth);
         return renderItems(varItems, nodes, rootChildren, currentId, onGoTo, `${key}-v`);
     });
