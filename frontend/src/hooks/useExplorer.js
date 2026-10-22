@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Board } from '../engine/board.js';
 import { Tablebase } from '../engine/tablebase.js';
 import { Theme } from '../engine/theme.js';
-import { VARIANTS, METRICS, STORAGE_KEYS, AUTOPLAY_DELAY } from '../engine/constants.js';
+import { VARIANTS, METRICS, STORAGE_KEYS, AUTOPLAY_DELAY, CLEARED_FEN } from '../engine/constants.js';
 import * as Storage from '../engine/storage.js';
 import { debounce } from '../engine/utils.js';
 import {
@@ -11,6 +11,10 @@ import {
 import { buildPgnText, parsePgn } from '../engine/pgnFormat.js';
 
 const DEFAULT_FEN = '4k3/8/8/8/8/8/8/4K2R w - - 0 1';
+
+// The startup and cleared positions are shown as an empty box so that a
+// pasted FEN replaces them directly.
+function fenInputText(fen) { return fen === DEFAULT_FEN || fen === CLEARED_FEN ? '' : fen; }
 
 const AUTO_PLAY_METRICS = Object.keys(METRICS);
 
@@ -37,10 +41,8 @@ export function useExplorer() {
     const [canForward, setCanForward] = useState(false);
     const [moveHistory, setMoveHistory] = useState({ nodes: [], rootChildren: [], rootActiveChild: null, currentId: -1 });
     const [startFen, setStartFen] = useState(DEFAULT_FEN);
-    // The PGN panel stays blank (not even "No moves yet") until Board
-    // reports a move-tree change for the first time - a fresh session
-    // with nothing restored from a link or localStorage never fires that
-    // callback until the player's first action.
+    // The PGN panel stays blank until the bootstrap effect has loaded the
+    // board and any restored game, so "No moves yet" never precedes restored moves.
     const [historyInitialized, setHistoryInitialized] = useState(false);
     const [fenError, setFenError] = useState(null);
 
@@ -236,7 +238,7 @@ export function useExplorer() {
             if (autoPlayMetricRef.current && !autoPlayMoveInFlightRef.current) stopAutoPlay();
 
             if (fenInputRef.current) {
-                fenInputRef.current.value = nextFen;
+                fenInputRef.current.value = fenInputText(nextFen);
                 fenInputRef.current.classList.remove('is-invalid');
             }
             setFenError(null);
@@ -248,7 +250,7 @@ export function useExplorer() {
             writeHash(nextFen, Board.getVariant());
             Board.clearArrows();
 
-            const count = Board.legalMoveCount();
+            const count = Board.isInsufficientMaterial() ? 0 : Board.legalMoveCount();
             Tablebase.setMoveCount(count > 0 ? `${count} legal move${count === 1 ? '' : 's'}` : '');
 
             const onProbeError = () => setReady(true);
@@ -257,6 +259,7 @@ export function useExplorer() {
                 debouncedProbe.cancel();
                 Tablebase.probe(nextFen, activeVariant, onProbeError);
             } else {
+                Tablebase.markPending();
                 debouncedProbe(nextFen, activeVariant, onProbeError);
             }
         }
@@ -302,6 +305,8 @@ export function useExplorer() {
         // onPositionChange call at the end of this effect.
         setLockedState(Board.isLocked());
         setStartFen(Board.getStartFen());
+        setMoveHistory(Board.getMoveHistory());
+        setHistoryInitialized(true);
 
         // ── Public actions ───────────────────────────────────────────────
         function applyFen(rawFen) {
@@ -328,8 +333,14 @@ export function useExplorer() {
             navigator.clipboard.writeText(Board.currentFen())
                 .then(() => toast('FEN copied!'))
                 .catch(() => {
-                    fenInputRef.current?.select();
-                    document.execCommand('copy');
+                    const input = fenInputRef.current;
+                    if (input) {
+                        const shown = input.value;
+                        input.value = Board.currentFen();
+                        input.select();
+                        document.execCommand('copy');
+                        input.value = shown;
+                    }
                     toast('FEN copied!');
                 });
         }
@@ -408,7 +419,7 @@ export function useExplorer() {
     // Auto-play starts its delay once the position's results have rendered.
     // Two frames also let a zero-delay run show each position's results.
     useEffect(() => {
-        if (!autoplayMetric || tb.loading) return;
+        if (!autoplayMetric || tb.pending || tb.loading) return;
         let frame = requestAnimationFrame(() => {
             frame = requestAnimationFrame(() => actionsRef.current.onAutoPlayResult());
         });

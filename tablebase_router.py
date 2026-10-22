@@ -1,8 +1,18 @@
 """tablebase_router.py: ordered TABLEBASE_PATH source resolution.
 
-TABLEBASE_PATH accepts either one path (a local directory or an http(s)://
-URL) or a list of them. Entries are tried left-to-right for every material.
+TABLEBASE_PATH accepts either a tablebase root (one local directory or
+http(s):// URL) or a list of explicit sources. A root expands to
+`root/full`, `root/full/castling`, `root`, and `root/castling`, so full
+tables are preferred over shipping tables. Expanded entries of a local root
+whose directory does not exist are skipped; a remote root keeps all four. A
+list is used as given. Entries are tried left-to-right for every material.
 A list mixing a local directory and a URL is a hybrid source.
+
+An entry listed together with its `castling` subdirectory forms a pair. A
+material name with a lowercase `r` (castling rights) searches only the
+castling entries of each pair; every other material searches only the
+remaining entries. The choice is made per table, so recursive dependencies
+that lose castling rights switch to the ordinary entries.
 
 SourcedTablebase below is what app.py opens as its single `TB` object. It
 resolves material lookup inside one upstream `chesstb.Tablebase`, so the
@@ -12,6 +22,7 @@ the root probe.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, List, Optional, Sequence, Union
 
 import chess.chesstb as chesstb
@@ -24,15 +35,24 @@ log = logging.getLogger(__name__)
 #: cache_stats().
 TablebaseLike = Any
 
-#: A TABLEBASE_PATH config value: one path (local directory or http(s)://
-#: URL), or a list of them for a hybrid source.
+#: A TABLEBASE_PATH config value: a tablebase root (local directory or
+#: http(s):// URL), or a list of explicit sources for a hybrid source.
 PathSpec = Union[str, Sequence[str]]
 
 
 def _as_path_list(spec: PathSpec) -> List[str]:
-    """Normalises a PathSpec to a flat list of non-empty path strings."""
-    paths = [spec] if isinstance(spec, str) else list(spec)
-    return [p for p in paths if p]
+    """Expands a root path to its ordered source entries, or returns the
+    non-empty entries of an explicit list unchanged."""
+    if not isinstance(spec, str):
+        return [p for p in spec if p]
+    if not spec:
+        return []
+    remote = spec.startswith(("http://", "https://"))
+    root = spec.rstrip("/\\") or spec
+    join = (lambda *parts: "/".join(parts)) if remote else os.path.join
+    paths = [join(root, "full"), join(root, "full", "castling"),
+             root, join(root, "castling")]
+    return [p for p in paths if remote or p == root or os.path.isdir(p)]
 
 
 def open_one(path: str, *, label: str, cfg: Any, remote_source: Any,
@@ -83,10 +103,10 @@ def open_one(path: str, *, label: str, cfg: Any, remote_source: Any,
 
 def open_many(spec: PathSpec, *, label: str, cfg: Any, remote_source: Any,
               remote_direct: Any, remote_download: Any) -> Optional[TablebaseLike]:
-    """Opens the TABLEBASE_PATH config value `spec` - one path or a
-    hybrid list of them - returning a single already-opened tablebase
-    (wrapped in CompositeTablebase when `spec` has more than one entry),
-    or None if `spec` has no usable entries."""
+    """Opens the TABLEBASE_PATH config value `spec` - a root path or an
+    explicit list - returning a single already-opened tablebase (wrapped
+    in CompositeTablebase when `spec` yields more than one entry), or None
+    if `spec` has no usable entries."""
     paths = _as_path_list(spec)
     if not paths:
         return None
@@ -107,7 +127,9 @@ def open_many(spec: PathSpec, *, label: str, cfg: Any, remote_source: Any,
             except Exception:
                 log.exception("Failed closing partially opened source for %s", label)
         raise
-    return sources[0] if len(sources) == 1 else CompositeTablebase(sources, remote_source=remote_source)
+    return sources[0] if len(sources) == 1 else CompositeTablebase(
+        sources, remote_source=remote_source, paths=paths,
+    )
 
 
 class _RemoteTableSource:
@@ -150,7 +172,7 @@ class _HybridDTM50File(_HybridSourced, chesstb.DTM50File):
 
 
 class CompositeTablebase:
-    """A hybrid TABLEBASE_PATH entry: an ordered list of already-opened
+    """The opened TABLEBASE_PATH entries: an ordered list of already-opened
     tablebase sources - any mix of a local chesstb.Tablebase and a
     remote_direct/remote_fallback backend - searched left-to-right until
     one resolves the material. Presents the same _find()/close()/
@@ -167,15 +189,36 @@ class CompositeTablebase:
     reporting "not found" instead would misrepresent a live network
     problem as a coverage gap - otherwise it returns None, the normal
     "position not covered" answer.
+
+    When `paths` lists an entry together with its `castling` subdirectory,
+    castling materials (lowercase `r` in the name) search only the castling
+    entries and other materials search only the remaining ones. Without
+    such a pair, every material searches every source.
     """
 
-    def __init__(self, sources: List[TablebaseLike], *, remote_source: Any) -> None:
+    def __init__(self, sources: List[TablebaseLike], *, remote_source: Any,
+                 paths: Optional[Sequence[str]] = None) -> None:
         self._sources = sources
         self._remote_errors = (remote_source.RemoteSourceError,)
+        self._material_sources = {False: sources, True: sources}
+        if paths is not None:
+            normalized = [p.rstrip("/\\") for p in paths]
+            paired_roots = {
+                p for p in normalized
+                if p + "/castling" in normalized or p + "\\castling" in normalized
+            }
+            castling_paths = {
+                p + suffix for p in paired_roots
+                for suffix in ("/castling", "\\castling")
+            }
+            self._material_sources = {
+                False: [s for s, p in zip(sources, normalized) if p not in castling_paths],
+                True: [s for s, p in zip(sources, normalized) if p not in paired_roots],
+            }
 
     def _find(self, kind: str, name: str, ext: str) -> Optional[Any]:
         last_error: Optional[BaseException] = None
-        for source in self._sources:
+        for source in self._material_sources["r" in name]:
             try:
                 found = source._find(kind, name, ext)
             except self._remote_errors as exc:

@@ -37,7 +37,17 @@
     transition: border-color var(--tr), box-shadow var(--tr);
 }
 .fen-input:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 2px var(--gold-glow); }
-.fen-input::placeholder { color: var(--text-muted); font-size: var(--text-xs); }
+.fen-input::placeholder {
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-style: italic;
+    opacity: 0.6;
+}
+/* Empty box: placeholder centered between equal label-width gutters. */
+.fen-input:placeholder-shown {
+    padding-right: 2.75rem;
+    text-align: center;
+}
 .fen-input.is-invalid {
     border-color: var(--loss) !important;
     box-shadow: 0 0 0 2px rgba(248,113,113,0.15) !important;

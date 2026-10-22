@@ -7,12 +7,12 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
     const errorMessage = fenError ?? tbError?.message ?? '';
     const isCoverageError = !fenError && !!tbError?.isCoverage;
 
-    function onFenKeyDown(e) {
-        if (e.key === 'Enter') { e.preventDefault(); actions.applyFen(e.currentTarget.value.trim()); }
-    }
-    function onApplyClick() {
+    function submitFen() {
         const v = fenInputRef.current?.value.trim();
         if (v) actions.applyFen(v);
+    }
+    function onFenKeyDown(e) {
+        if (e.key === 'Enter') { e.preventDefault(); submitFen(); }
     }
     function onLockClick() {
         if (lockAutoplayDisabled) return;
@@ -27,7 +27,7 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
                     <input
                         id="fen-input" className="fen-input" type="text"
                         ref={fenInputRef}
-                        placeholder="Paste FEN here…" disabled={!ready}
+                        placeholder="Enter FEN here" disabled={!ready}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false"
                         aria-label="FEN position string"
                         onKeyDown={onFenKeyDown}
@@ -44,7 +44,7 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
                 </div>
 
                 <div className="fen-actions" role="toolbar" aria-label="Board actions">
-                    <Button id="apply-btn" variant="primary" grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={onApplyClick}>Apply</Button>
+                    <Button id="apply-btn" variant="primary" grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={submitFen}>Apply</Button>
                     <Button id="flip-btn" grow icon="flip" title="Flip board (F)" onClick={actions.flip}>Flip</Button>
                     <Button id="clear-btn" grow icon="trash" title="Clear board (C)" onClick={actions.clearBoard}>Clear</Button>
                     <Button id="copy-btn" grow icon="copy" title="Copy FEN to clipboard" aria-label="Copy FEN to clipboard" onClick={actions.copyFen}>Copy</Button>

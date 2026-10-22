@@ -82,7 +82,7 @@ import { parseFen, makeFen }       from '../vendor/chessops/fen.js';
 import { chessgroundDests }        from '../vendor/chessops/compat.js';
 import { parseSan, makeSan }       from '../vendor/chessops/san.js';
 import { parseSquare, makeSquare } from '../vendor/chessops/util.js';
-import { VARIANTS, ROOT_ID, METRICS, STORAGE_KEYS } from './constants.js';
+import { VARIANTS, ROOT_ID, METRICS, STORAGE_KEYS, CLEARED_FEN } from './constants.js';
 import { childrenOf }  from './tree.js';
 
 // ── Variant ──────────────────────────────────────────────────────────────
@@ -877,12 +877,11 @@ const Board = (() => {
     }
 
     function clear() {
-        const prevFen  = currentFen();
-        const resetFen = '4k3/8/8/8/8/8/8/4K3 w - - 0 1';
-        const built = _buildPosition(resetFen);
-        console.assert(built.ok, 'clear(): resetFen must always be valid');
+        const prevFen = currentFen();
+        const built = _buildPosition(CLEARED_FEN);
+        console.assert(built.ok, 'clear(): CLEARED_FEN must always be valid');
         _commitReplacedPosition(built.pos, prevFen);
-        return resetFen;
+        return CLEARED_FEN;
     }
 
     // Mirrors chessground's own orientation as a class on #board-wrap-inner;
@@ -964,6 +963,8 @@ const Board = (() => {
     // underpromotion choice separately (see _countLegalMoves above) and
     // including Chess960 castling.
     function legalMoveCount() { return _position ? _countLegalMoves(_position) : 0; }
+
+    function isInsufficientMaterial() { return !!_position && _position.isInsufficientMaterial(); }
 
     // Result token for an arbitrary FEN, independent of the live board
     // state - used by pgnFormat.js's PGN-result detection. Returns '*'
@@ -1235,7 +1236,7 @@ const Board = (() => {
         getMoveHistory, getStartFen, setOnMoveHistoryChange,
         drawArrows, clearArrows,
         setLocked, isLocked,
-        setVariant, getVariant, isChess960, legalMoveCount, outcomeFromFen,
+        setVariant, getVariant, isChess960, legalMoveCount, isInsufficientMaterial, outcomeFromFen,
     };
 
 })();

@@ -1,5 +1,6 @@
 /* ── Results panel ──────────────────────────────────────────────────── */
 .results-panel { container: results / inline-size; }
+.results-panel.is-pending .moves-view { pointer-events: none; }
 .results-panel.is-loading .moves-view { opacity: .55; pointer-events: none; }
 /* The auto-play "stop" control must stay clickable even while a probe is in
    flight - otherwise there's only a brief window between probe cycles where
@@ -13,6 +14,7 @@
 /* Inline next to the panel title, to its right, instead of a full-width
    bar under the panel header - keeps the header height stable and puts
    progress right next to the label it's updating towards. */
+.probe-status { align-items: center; gap: 0.625rem; min-width: 0; }
 .probe-progress {
     width: 10.5rem;
     height: 0.25rem;
@@ -29,14 +31,34 @@
     transition: width 0.3s ease;
     width: 0%;
 }
+.probe-progress.is-indeterminate .probe-progress__fill {
+    width: 35%;
+    animation: probe-pending 1.4s ease-in-out infinite;
+}
+@keyframes probe-pending {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(290%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .probe-progress.is-indeterminate .probe-progress__fill { animation: none; left: 32.5%; }
+}
 .probe-progress-label {
     font-size: var(--text-xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
     white-space: nowrap;
+    /* Optical alignment with the adjacent header text. */
+    position: relative;
+    top: -0.03125rem;
 }
 .probe-progress-label:empty {
     display: none;
+}
+@media (max-width: 767px) {
+    .results-panel .panel-header { flex-wrap: wrap; }
+    .results-panel .panel-header__start { display: contents; }
+    .probe-status { order: 3; flex: 0 0 100%; }
+    .probe-status .probe-progress { flex: 1; width: auto; }
 }
 
 /* ── Moves view ─────────────────────────────────────────────────────── */

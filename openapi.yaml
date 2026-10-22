@@ -79,7 +79,10 @@ paths:
         Identical to /probe but returns text/event-stream.
         Each SSE event has a JSON payload in its data field.
         Events are emitted as child positions are probed, followed by the
-        final result or an error event. An error event with
+        final result or an error event. A position with a complete cached
+        response is answered with the final result alone. Lines starting
+        with ":" are SSE keep-alive comments and carry no data.
+        An error event with
         error_code=probe_timeout means a concurrent request was already
         probing the same (variant, FEN) pair and didn't finish in time;
         retrying is usually cheap and likely to resolve.

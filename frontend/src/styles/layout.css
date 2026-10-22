@@ -52,6 +52,16 @@
 /* ── Layout ─────────────────────────────────────────────────────────── */
 :root { --pgn-col-w: 12.5rem; }
 
+/* Above 1180px the PGN column takes up to 2.5rem of the width left after the
+   board and the 50rem the results table needs for untruncated text, so the
+   board size and the table text are unchanged. Reserved width: padding 4rem +
+   gaps 3rem + base column 12.5rem + table 50rem = 69.5rem. */
+@media (min-width: 1181px) {
+    :root {
+        --pgn-col-w: calc(12.5rem + clamp(0rem, min(100vw, var(--content-max)) - 69.5rem - var(--board-size), 2.5rem));
+    }
+}
+
 .content {
     display: grid;
     grid-template-columns: var(--board-size) minmax(21.25rem, 1fr) var(--pgn-col-w);

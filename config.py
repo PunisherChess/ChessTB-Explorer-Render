@@ -44,25 +44,29 @@ def _tablebase_path_from_env(default: str) -> "str | list[str]":
 
 
 # TABLEBASE_PATH locates the ChessTB tables for every position, whatever
-# its piece count or castling rights. Each material is looked up through
-# the entries in order, and a root position and the child positions it
-# depends on share that order. See tablebase_router.py's module docstring
-# for the full design.
+# its piece count or castling rights. A single path is a tablebase root and
+# expands to <root>/full, <root>/full/castling, <root>, and <root>/castling,
+# searched in that order: full tables are preferred over shipping tables,
+# and a position and the child positions it depends on share that order.
+# Castling materials (lowercase `r` in the name) search only the
+# castling entries, and other materials only the remaining ones. For a
+# local root, entries whose directory does not exist are skipped. See
+# tablebase_router.py's module docstring for the full design.
 #
 # TABLEBASE_PATH accepts:
-#   - a local directory path         TABLEBASE_PATH = r"C:\chesstb\6men"
-#                                     TABLEBASE_PATH = "/data/chesstb/6men"
-#   - an http(s):// base URL         TABLEBASE_PATH = "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve"
+#   - a local root directory         TABLEBASE_PATH = r"C:\chesstb"
+#                                     TABLEBASE_PATH = "/data/chesstb"
+#   - an http(s):// root URL         TABLEBASE_PATH = "https://huggingface.co/buckets/chesstb/chesstb/resolve"
 #                                     (the bucket's /resolve path - see README.md)
-#   - a list mixing the two, tried left-to-right until one has the
-#     material being probed - a "hybrid" source, typically a local mirror
-#     of frequently probed materials backed by a remote URL for the rest:
-#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve"]
-#     (the environment variable supplies the same list as comma-separated
-#     entries: TABLEBASE_PATH=/data/chesstb/6men,https://example.org/tables)
-#
-# A table set published under several paths (for example a separate
-# castling set) is covered by listing each path.
+#   - a list of explicit sources, used as given with no expansion and tried
+#     left-to-right until one has the material being probed - a "hybrid"
+#     source, typically a local mirror of frequently probed materials
+#     backed by a remote URL for the rest. An entry listed together with
+#     its `castling` subdirectory forms a pair, as above:
+#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://example.org/tables"]
+#     (the environment variable supplies a root as one entry, or the same
+#     list as comma-separated entries:
+#     TABLEBASE_PATH=/data/chesstb/6men,https://example.org/tables)
 #
 # Left empty, the app still starts, but every /probe request will fail
 # and /health will report "degraded" until TABLEBASE_PATH is set.
@@ -191,9 +195,11 @@ BLOCK_CACHE_BYTES = 64 * 1024 * 1024
 # materials accessed.
 REMOTE_MODE = "direct"
 
-# Soft budget, in bytes, shared across every remote table opened this
-# session: bounds the in-memory page cache in "direct" mode, and the
-# on-disk cache of whole downloaded table files in "download" mode.
+# Soft budget, in bytes, per remote source in TABLEBASE_PATH, shared across
+# that source's tables: bounds the in-memory page cache in "direct" mode, and
+# the on-disk cache of whole downloaded table files in "download" mode. Four
+# remote sources, such as the entries of an expanded remote root, can retain
+# four times this budget in total.
 REMOTE_PAGE_CACHE_BYTES = 128 * 1024 * 1024
 
 # Size, in bytes, of one page. In "direct" mode this is the granularity of

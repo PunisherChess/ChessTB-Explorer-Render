@@ -5,6 +5,9 @@
 // The application's rules-mode state (Standard / Chess960).
 export const VARIANTS = Object.freeze({ STANDARD: 'standard', CHESS960: 'chess960' });
 
+// Position loaded by Board.clear(): the two kings only.
+export const CLEARED_FEN = '4k3/8/8/8/8/8/8/4K3 w - - 0 1';
+
 // parentId / currentId of the position before any move in a move tree.
 export const ROOT_ID = -1;
 
