@@ -89,10 +89,11 @@
 .toggle-switch__track::before {
     content: '';
     position: absolute;
-    top: 0.0625rem;
-    left: 0.0625rem;
+    top: 50%;
+    left: calc(0.125rem - 1px);   /* 0.125rem ring on every side, less the track border */
     width: 1rem;
     height: 1rem;
+    margin-top: -0.5rem;
     border-radius: 50%;
     background: var(--text-dim);
     transition: transform var(--tr), background var(--tr);

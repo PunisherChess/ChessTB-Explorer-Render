@@ -70,6 +70,7 @@ interactive debugger) for local development. See README.md
 
 from __future__ import annotations
 
+from collections import OrderedDict, namedtuple
 from concurrent.futures import (
     ThreadPoolExecutor,
     wait as futures_wait,
@@ -834,6 +835,8 @@ def _probe_fen_deduped(variant: str, fen: str) -> chesstb.ProbeResult | None:
     cfg.probe_timeout when no deadline was set, for a caller reached
     outside a deadline-aware path. The wait expiring raises, which reads
     downstream as a retryable failure just like the probe itself timing out.
+    A deadline that has already passed raises before any work is started or
+    joined.
 
     The owner builds the chess.Board to probe from (variant, fen) itself
     unless the calling thread already left one in _probe_tls.board (see
@@ -847,6 +850,9 @@ def _probe_fen_deduped(variant: str, fen: str) -> chesstb.ProbeResult | None:
     a key of fen alone would let one variant's probe be served to the
     other's caller.
     """
+    deadline = getattr(_probe_tls, "deadline", None)
+    if deadline is not None and time.monotonic() >= deadline:
+        raise ProbeInFlightTimeout("Probe deadline expired before work started")
     key = (variant, fen)
     with _inflight_lock:
         slot = _inflight.get(key)
@@ -857,7 +863,6 @@ def _probe_fen_deduped(variant: str, fen: str) -> chesstb.ProbeResult | None:
             owner = False
 
     if not owner:
-        deadline = getattr(_probe_tls, "deadline", None)
         timeout = (deadline - time.monotonic()) if deadline is not None else cfg.probe_timeout
         if timeout <= 0 or not slot.done.wait(max(0, timeout)):
             raise ProbeInFlightTimeout(f"Timed out waiting on an in-flight probe of variant={variant} {fen}")
@@ -1053,6 +1058,7 @@ def evaluate_all_moves(
                     probe_cache[fen] = None
                     transient_failures.add(fen)
             else:
+                fut.cancel()  # Drops queued work; a running probe still warms the cache.
                 log.warning("Probe timed out for variant=%s %s", variant, fen)
                 probe_cache[fen] = None
                 transient_failures.add(fen)
@@ -1441,12 +1447,12 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
     position the user just moved into) is served from cache instead of
     re-hitting the tablebase.
 
-    (variant, fen) are the only arguments (required for @lru_cache to key on
-    them), so a caller that already built a board/move_info for this exact
+    (variant, fen) are the only arguments, as they are evaluate_fen()'s cache
+    key, so a caller that already built a board/move_info for this exact
     pair -- e.g. probe_stream()'s SSE handler, which needs both up front
     anyway to size its progress bar -- hands them over via _evaluate_tls
     instead, letting this call skip redoing that work. Ignored on a cache
-    hit, since the function body below never runs in that case.
+    hit, since evaluate_fen() returns before calling this function.
 
     Raises _IncompleteResult (carrying the same JSON) when a move came back
     unknown for a retryable reason, so evaluate_fen() can serve it without
@@ -1542,25 +1548,64 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
     return json_str
 
 
-# The cache lives on the inner function only: lru_cache never stores the result
-# of a call that raised, so an _IncompleteResult passes straight through to the
-# caller without being memoized, and the next request for that (variant, fen)
-# re-probes. By then the timed-out probes have usually landed in _probe_fen's
-# own cache, so the retry is both cheap and likely to resolve.
-@lru_cache(maxsize=cfg.evaluate_cache_size)
-def _evaluate_fen_cached(variant: str, fen: str) -> str:
-    return _evaluate_fen_impl(variant, fen)
+# Completed responses live in an explicit LRU so probe_stream() can serve one
+# before building a board, walking legal moves or queuing child probes. An
+# _IncompleteResult is returned without being stored, so the next request for
+# that (variant, fen) re-probes; by then the timed-out probes have usually
+# landed in _probe_fen's own cache, so the retry is cheap and likely to
+# resolve. Evaluation runs outside the lock.
+_evaluation_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+_evaluation_cache_lock = threading.Lock()
+_evaluation_hits = _evaluation_misses = 0
+_EvaluationCacheInfo = namedtuple("CacheInfo", "hits misses maxsize currsize")
+
+
+def _cached_evaluation(variant: str, fen: str, *, count_miss: bool = True) -> str | None:
+    global _evaluation_hits, _evaluation_misses
+    with _evaluation_cache_lock:
+        key = (variant, fen)
+        result = _evaluation_cache.get(key)
+        if result is not None:
+            _evaluation_cache.move_to_end(key)
+            _evaluation_hits += 1
+        elif count_miss:
+            _evaluation_misses += 1
+        return result
 
 
 def evaluate_fen(variant: str, fen: str) -> str:
+    cached = _cached_evaluation(variant, fen)
+    if cached is not None:
+        return cached
     try:
-        return _evaluate_fen_cached(variant, fen)
+        result = _evaluate_fen_impl(variant, fen)
     except _IncompleteResult as incomplete:
         return incomplete.json_str
+    with _evaluation_cache_lock:
+        key = (variant, fen)
+        _evaluation_cache[key] = result
+        _evaluation_cache.move_to_end(key)
+        while len(_evaluation_cache) > cfg.evaluate_cache_size:
+            _evaluation_cache.popitem(last=False)
+    return result
 
 
-evaluate_fen.cache_clear = _evaluate_fen_cached.cache_clear  # type: ignore[attr-defined]
-evaluate_fen.cache_info  = _evaluate_fen_cached.cache_info   # type: ignore[attr-defined]
+def _clear_evaluation_cache() -> None:
+    global _evaluation_hits, _evaluation_misses
+    with _evaluation_cache_lock:
+        _evaluation_cache.clear()
+        _evaluation_hits = _evaluation_misses = 0
+
+
+def _evaluation_cache_info():
+    with _evaluation_cache_lock:
+        return _EvaluationCacheInfo(
+            _evaluation_hits, _evaluation_misses, cfg.evaluate_cache_size, len(_evaluation_cache),
+        )
+
+
+evaluate_fen.cache_clear = _clear_evaluation_cache  # type: ignore[attr-defined]
+evaluate_fen.cache_info  = _evaluation_cache_info   # type: ignore[attr-defined]
 
 
 # ── Common (variant, FEN) extraction + validation helper ──────────────────────
@@ -1677,6 +1722,11 @@ def probe_stream() -> Response | tuple[Response, int]:
         return f"data: {json.dumps(obj)}\n\n"
 
     def generate():
+        # A complete cached response needs no board, move walk or child probes.
+        cached = _cached_evaluation(variant, fen, count_miss=False)
+        if cached is not None:
+            yield 'data: {"status":"done",' + cached[1:] + '\n\n'
+            return
         # Validated up front (rather than only inside evaluate_fen below) so
         # the validation error can be reported immediately over SSE instead of
         # only finding out after pre-warming child positions. Uses the same
@@ -1752,20 +1802,36 @@ def probe_stream() -> Response | tuple[Response, int]:
         remaining = set(futures.values())
         done_count = 0
         prewarm_complete = True
-        while done_count < total:
-            time_left = deadline - time.monotonic()
-            if time_left <= 0:
-                log.warning(
-                    "Probe pre-warm timed out for variant=%s %s (%d/%d child positions still pending)",
-                    variant, fen, total - done_count, total,
+        last_event = time.monotonic()
+        try:
+            while done_count < total:
+                time_left = deadline - time.monotonic()
+                if time_left <= 0:
+                    log.warning(
+                        "Probe pre-warm timed out for variant=%s %s (%d/%d child positions still pending)",
+                        variant, fen, total - done_count, total,
+                    )
+                    prewarm_complete = False
+                    break
+                newly_done, remaining = futures_wait(
+                    remaining, timeout=min(0.3, time_left), return_when=FIRST_COMPLETED
                 )
-                prewarm_complete = False
-                break
-            newly_done, remaining = futures_wait(
-                remaining, timeout=min(0.3, time_left), return_when=FIRST_COMPLETED
-            )
-            done_count += len(newly_done)
-            yield _sse({"status": "probing", "completed": done_count, "total": total})
+                if any(f.cancelled() or f.exception() is not None for f in newly_done):
+                    prewarm_complete = False
+                if newly_done:
+                    done_count += len(newly_done)
+                    yield _sse({"status": "probing", "completed": done_count, "total": total})
+                    last_event = time.monotonic()
+                elif time.monotonic() - last_event >= 1.0:
+                    # An SSE comment keeps the stream live and surfaces a client
+                    # disconnect; the browser ignores it.
+                    yield ": keep-alive\n\n"
+                    last_event = time.monotonic()
+        finally:
+            # Also runs when the client disconnects. A running probe finishes
+            # and warms the cache; queued work is dropped.
+            for future in remaining:
+                future.cancel()
 
         # If pre-warming above finished, every child FEN is already cached, so
         # evaluate_fen() below can fetch them all as cache hits sequentially,

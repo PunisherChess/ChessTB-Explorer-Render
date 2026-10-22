@@ -62,7 +62,7 @@ function PgnPanel({ moveHistory, startFen, historyInitialized, actions }) {
 
     // Memo key is `moveHistory`: the board passes a new object on every tree change.
     const content = useMemo(() => {
-        if (!historyInitialized) return null;   // no render until Board reports its first move-tree change
+        if (!historyInitialized) return null;   // no render until the board bootstrap has finished
         const { nodes: treeNodes, rootChildren, currentId: current } = moveHistory;
         if (!rootChildren || rootChildren.length === 0) {
             return <span className="move-line__empty">No moves yet</span>;
@@ -77,8 +77,8 @@ function PgnPanel({ moveHistory, startFen, historyInitialized, actions }) {
             className="pgn-panel" label="Game PGN" title="PGN"
             end={
                 <>
-                    <Button id="pgn-btn" compact iconOnly icon="fileIn" title="Import PGN game" aria-label="Import PGN game" onClick={actions.openPgnDialog} />
-                    <Button id="pgn-export-btn" compact iconOnly icon="fileOut" title="Export PGN game" aria-label="Export PGN game" onClick={actions.exportPgn} />
+                    <Button id="pgn-btn" compact icon="fileIn" title="Import PGN" aria-label="Import PGN" onClick={actions.openPgnDialog}><span className="btn__label">Import</span></Button>
+                    <Button id="pgn-export-btn" compact icon="fileOut" title="Export PGN" aria-label="Export PGN" onClick={actions.exportPgn}><span className="btn__label">Export</span></Button>
                 </>
             }
         >

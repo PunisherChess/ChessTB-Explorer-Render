@@ -99,6 +99,10 @@ move generation/validation, supporting both Standard chess and Chess960
 - **Streaming probes**: `/probe/stream` reports progress via
   Server-Sent Events while child positions are being probed, so the UI
   shows a live progress bar instead of a blank pause on slower lookups.
+  A cached result is returned immediately. Rows of the previous position
+  cannot be selected from the moment a position change is made until its
+  result applies, and the table is blanked only if the probe takes longer
+  than a short delay.
 - **Hover pre-fetch**: hovering a move in the table warms the cache for
   the resulting position before selection.
 - **Admin cache dashboard** (`/admin`, behind `ADMIN_TOKEN`) - live
@@ -132,8 +136,10 @@ Flask app (app.py)
         │
         ▼
 tablebase_router.py - resolves each material through the ordered
-TABLEBASE_PATH entries, first match wins (variant-agnostic - a Chess960
-board resolves the same way a Standard board does)
+TABLEBASE_PATH entries, first match wins (a root expands to its `full`,
+`full/castling`, root, and `castling` entries; castling materials use only
+the castling entries; variant-agnostic - a Chess960 board resolves the
+same way a Standard board does)
         │
         ▼
 chesstb.open_tablebase(...) per source   (noobpwnftw's modified python-chess fork)
@@ -239,6 +245,11 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
   left column is as wide as the board, so it is capped at 720 px as well.
   The width the board column does not use goes to the results column, so
   the total content width stays constant.
+- **PGN column:** above 1180 px, the column is 12.5 rem wide plus up to
+  2.5 rem taken from the width left over after the board and the 50 rem
+  the results table needs for untruncated text, so the board size and the
+  table text are unchanged. The Import and Export buttons show their labels
+  once the PGN panel header content is at least 12.25 rem wide.
 - **Tablet layout:** at 1180 px and below, the root font size is the
   browser default and `--board-size` is `--board-size-cap`, defined in
   `tokens.css` as
@@ -269,7 +280,8 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
   disk, or an `http(s)://` base URL serving the same layout remotely with
   no local download (see [Getting the tablebase files](#getting-the-tablebase-files)).
   The app starts without one, but every probe will fail until
-  `TABLEBASE_PATH` points at one of the two, or at a list of them; see
+  `TABLEBASE_PATH` points at a root of either kind, or at a list of
+  explicit sources; see
   [Configuration reference](#configuration-reference).
 - A modern browser (the frontend uses `fetch`, `ReadableStream`, and CSS
   container queries).
@@ -295,12 +307,12 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
    PyPI `chess` package; see the comments in `requirements.txt` for why
    that distinction matters).
 
-3. **Get the tablebase files**: see the next section. When using the
-   remote (no-download) option requires no fetch; continue to step 4 and
-   point `TABLEBASE_PATH` at the URL.
+3. **Get the tablebase files**: see the next section. The remote
+   (no-download) option requires no fetch; continue to step 4 and point
+   `TABLEBASE_PATH` at the root URL.
 
 4. **Configure `config.py`**: open it and set `TABLEBASE_PATH` to the
-   directory (or URL) from step 3:
+   root directory (or URL) from step 3:
 
    ```python
    TABLEBASE_PATH = "/data/chesstb"
@@ -309,12 +321,13 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
    or, for the remote option:
 
    ```python
-   TABLEBASE_PATH = "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve"
+   TABLEBASE_PATH = "https://huggingface.co/buckets/chesstb/chesstb/resolve"
    ```
 
-   See [Getting the tablebase files](#getting-the-tablebase-files) for
-   the ordered source list, which includes shipping tables for both
-   ordinary and castling materials.
+   A single path is a tablebase root: its `full/` and `castling/`
+   subdirectories are used automatically. See
+   [Getting the tablebase files](#getting-the-tablebase-files) for the
+   routing rules and the explicit list form.
 
    Every other setting in `config.py` has a default and a comment
    explaining what it does - see
@@ -356,38 +369,38 @@ ChessTB tablebase files are available two ways:
 
 ### Option A: Remote, no local download (recommended)
 
-The shipping ChessTB tables are published as a Hugging Face storage
-bucket, browsable at:
-
-```
-https://huggingface.co/buckets/noobpwnftw/chesstb
-```
-
-Its root holds `wdl/`, `dtz/`, `dtc/`, `dtm/`, `dtm50/`, and `castling/`,
-all in shipping format. `wdl/` and `dtz/` cover 3-8 piece material; `dtc/`,
-`dtm/`, and `dtm50/` cover 3-6 piece material. Shipping castling WDL/DTZ
-tables also cover seven pieces. Raw generator output is available
-separately under `full/` on the rsync mirror at
-`rsync://ftp.chessdb.cn/ftp/pub/chesstb/full/`; it is not stored in the
-bucket.
+Tables are available in the
+[ChessTB bucket](https://huggingface.co/buckets/chesstb/chesstb), a Hugging
+Face storage bucket. Shipping tables are grouped by metric (`wdl/`, `dtz/`,
+`dtc/`, `dtm/`, `dtm50/`) at the bucket root, and raw generator output
+(full tables) is under `full/`. Both use `castling/` for tables with
+castling rights. `wdl/` and `dtz/` cover 3-8 piece material; `dtc/`,
+`dtm/`, and `dtm50/` cover 3-6 piece material. The rsync mirror provides
+the same full tables at `rsync://ftp.chessdb.cn/ftp/pub/chesstb/full/`.
 
 Raw file bytes for a bucket path are served from the matching
-`/resolve/<path>` URL. The recommended setup lists the bucket root first
-and `castling/` second. Each table lookup, including recursive
-dependencies, tries them in that order:
+`/resolve/<path>` URL. Set `TABLEBASE_PATH` to the bucket root:
 
 ```python
-TABLEBASE_PATH = [
-    "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve",
-    "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve/castling",
-]
+TABLEBASE_PATH = "https://huggingface.co/buckets/chesstb/chesstb/resolve"
 ```
 
-The same list is set from the environment as comma-separated entries in
-`TABLEBASE_PATH`. Pointing `TABLEBASE_PATH` alone at the bucket root covers
-every piece count for positions without castling rights; castling tables,
-including seven-piece materials, live only under `castling/`, not alongside
-the plain material files.
+A single path is a tablebase root. It expands to `root/full`,
+`root/full/castling`, `root`, and `root/castling`, searched in that
+order, so full tables are preferred over shipping tables. Each table
+lookup, including recursive dependencies, filters the paired entries by
+the material name: a lowercase `r` selects the castling entries, and other
+materials select the ordinary entries, so a dependency that loses castling
+rights switches to the ordinary entries. This applies to Standard chess
+and Chess960. A local root uses the same layout, and its expanded entries
+whose directories do not exist are skipped. A remote root keeps all four
+entries, so it must follow this layout.
+
+A list is used as given, with no expansion. It is the form for roots with
+a different layout and for hybrid sources. The environment variable
+`TABLEBASE_PATH` takes one root, or a list as comma-separated entries. An
+entry listed together with its `castling` subdirectory forms a pair as
+above; entries without a pair are searched for every material.
 
 However many entries are listed, the app probes tables over HTTP.
 `REMOTE_MODE` selects the remote access mode, which stays fixed for the
@@ -415,6 +428,14 @@ its children, and pawn positions reach promotion sub-tables - so one cold
 probe can open several materials and issue several fetches against each.
 That is also why `REMOTE_PAGE_SIZE_BYTES` should stay large. See each
 module's docstring for the full design.
+
+Both remote modes cache successful signed CDN redirects until 60 seconds
+before expiry, so later byte-range reads bypass the resolver. A failed
+cached URL is retried through the original URL to obtain a fresh redirect.
+`/probe/stream` returns a complete cached response immediately, without
+rebuilding the board or queuing child probes. Queued child work is
+cancelled when a stream disconnects or its pre-warm deadline expires;
+running probes finish and warm the shared cache.
 
 Remote access suits a machine without a couple of terabytes of local disk
 for the full tablebase set. Its costs are probe latency on first touch of
@@ -454,7 +475,8 @@ Regardless of how it is configured, if `TABLEBASE_PATH` is unset, missing/unreac
 points at a location with no usable tables, the app still starts (with a
 warning in the logs) - every `/probe` request will then return an error,
 and `/health` reports `"degraded"`. If any entry of a `TABLEBASE_PATH`
-list fails to open, the whole setting fails to open.
+list, or of a root's expanded entries, fails to open, the whole setting
+fails to open.
 
 ---
 
@@ -466,7 +488,7 @@ explaining what it does. The table below is the complete reference.
 
 | Setting                     | Default          | Description |
 |-----------------------------|-------------------|-------------|
-| `TABLEBASE_PATH`            | `""` (also readable from a `TABLEBASE_PATH` env var) | Directory containing the ChessTB tablebase files, **or** an `http(s)://` base URL serving the same layout remotely (e.g. a Hugging Face storage bucket - see [Getting the tablebase files](#getting-the-tablebase-files)). Required for probing to work. A list of directories and URLs, tried left-to-right for every material (a hybrid source), is accepted as a literal in `config.py`; the env var takes the same list as comma-separated entries. Covers every piece count and castling right. On Render, set this from the service's Environment tab (or `render.yaml`'s prompt) instead of editing the file. |
+| `TABLEBASE_PATH`            | `""` (also readable from a `TABLEBASE_PATH` env var) | Directory containing the ChessTB tablebase files, **or** an `http(s)://` base URL serving the same layout remotely (e.g. a Hugging Face storage bucket - see [Getting the tablebase files](#getting-the-tablebase-files)). Required for probing to work. A single path is a tablebase root, expanded to `root/full`, `root/full/castling`, `root`, and `root/castling` (full tables preferred; missing local directories are skipped). A list of directories and URLs, tried left-to-right for every material (a hybrid source), is used as given with no expansion; it is accepted as a literal in `config.py`, and the env var takes the same list as comma-separated entries. An entry listed with its `castling` subdirectory forms a pair: castling materials search only the castling entries and other materials only the remaining ones. Covers every piece count and castling right. On Render, set this from the service's Environment tab (or `render.yaml`'s prompt) instead of editing the file. |
 | `DEBUG`                     | `False`           | `True` runs `app.py` via Flask's own dev server (auto-reload, detailed tracebacks) instead of waitress. Leave `False` - which serves via waitress - for anything reachable from another machine. See [Running in production](#running-in-production). |
 | `HOST`                      | `"0.0.0.0"`       | Interface the server (waitress, or the dev server if `DEBUG = True`) binds to. |
 | `PORT`                      | `7860` (also readable from a `PORT` env var) | Port the server listens on. Render injects its own `PORT` at deploy time and this picks it up automatically - nothing to set for a Render deployment. |
@@ -478,7 +500,7 @@ explaining what it does. The table below is the complete reference.
 | `PROBE_CACHE_SIZE`          | `16384`           | Max entries in the child-position probe cache (raw `chess.chesstb.ProbeResult` objects - WDL/DTZ/DTC/DTM/DTM50 together). |
 | `BLOCK_CACHE_BYTES`         | `67108864` (64 MiB) | Size, in bytes, of `chesstb`'s own internal cache of decoded/decompressed tablebase blocks (shared across the WDL/DTZ/DTC/DTM/DTM50 tables). Raising this trades RAM for fewer repeated disk reads/HTTP fetches + decompressions across a session - most worthwhile when `PROBE_PARALLEL_THRESHOLD` is set high enough that probing runs mostly serially. |
 | `REMOTE_MODE`               | `"direct"`        | **Remote tablebase entries only.** `"direct"` probes the remote tables in place over byte ranges (nothing written to disk); `"download"` fetches each table in full on first touch and caches it on local disk. See [Getting the tablebase files](#getting-the-tablebase-files). |
-| `REMOTE_PAGE_CACHE_BYTES`   | `134217728` (128 MiB) | **Remote tablebase entries only.** Soft budget, in bytes, shared across every remote table opened this session: the in-memory page cache in `"direct"` mode, the on-disk cache of whole downloaded files in `"download"` mode. See [Getting the tablebase files](#getting-the-tablebase-files). |
+| `REMOTE_PAGE_CACHE_BYTES`   | `134217728` (128 MiB) | **Remote tablebase entries only.** Soft budget, in bytes, per remote source in `TABLEBASE_PATH`, shared across that source's tables: the in-memory page cache in `"direct"` mode, the on-disk cache of whole downloaded files in `"download"` mode. Four remote sources, such as the entries of an expanded remote root, can retain four times this budget in total. See [Getting the tablebase files](#getting-the-tablebase-files). |
 | `REMOTE_PAGE_SIZE_BYTES`    | `262144` (256 KiB) | **Remote tablebase entries only.** Size, in bytes, of one page. In `"direct"` mode this is the granularity of every fetch, so it trades over-fetching against round trips per probe; in `"download"` mode it is only the chunk size used while streaming a full file down. |
 | `REMOTE_TIMEOUT_SECS`       | `20`              | **Remote tablebase entries only.** Per-HTTP-request timeout for existence/size checks and the download itself. |
 | `REMOTE_MAX_RETRIES`        | `3`               | **Remote tablebase entries only.** Attempts for a single remote request before it's treated as failed. |
@@ -563,7 +585,8 @@ variables). Render finds it automatically:
    **New → Blueprint** and connect the repo.
 3. Render reads `render.yaml` and requests the one setting required
    before the first deploy can run: **`TABLEBASE_PATH`** - the
-   `http(s)://` base URL of the remote tablebase (see
+   `http(s)://` base URL of the remote tablebase, or several URLs as
+   comma-separated entries (see
    [Getting the tablebase files](#getting-the-tablebase-files)).
    `ADMIN_TOKEN` and `FLASK_SECRET_KEY` are generated automatically.
 4. Click **Apply** / **Create**. Render builds the image from this
@@ -586,8 +609,8 @@ The service can also be configured manually without the Blueprint file:
 3. Set **Runtime** to **Docker** (Render should detect the `Dockerfile`
    at the repo root automatically).
 4. Under **Environment**, add:
-   - `TABLEBASE_PATH`: required; same as Option 1 above. Several sources
-     are entered as comma-separated URLs.
+   - `TABLEBASE_PATH`: required; same as Option 1 above. One URL is a
+     tablebase root; several sources are entered as comma-separated URLs.
    - `ADMIN_TOKEN`: optional but recommended; any secret string, or
      use Render's "Generate" button. While it is unset, `/admin`
      responds `503`.
@@ -627,8 +650,10 @@ means no persistent disk is needed regardless of plan - see
 ## Usage guide
 
 - **Set a position**: type or paste a FEN into the FEN box and press
-  `Enter` or **Apply**. The move rankings and best-move arrows update
-  automatically. The castling-availability field accepts `-` or any
+  `Enter` or **Apply**. The box is empty at the startup and cleared
+  positions, so a pasted FEN is entered without clearing it first; an
+  empty box is ignored on submit. The move rankings and best-move arrows
+  update automatically. The castling-availability field accepts `-` or any
   combination of `K`, `Q`, `k`, `q` (each requiring a matching king and
   rook on their home squares); in **Chess960 Mode** it additionally
   accepts X-FEN/Shredder-FEN rook-file letters (`a`-`h` / `A`-`H`). A
@@ -666,11 +691,12 @@ means no persistent disk is needed regardless of plan - see
   to have the app play that metric's best move on a timer (delay set by
   **Autoplay Delay** in settings, 1.25s by default); click again (the
   button shows ■ while running) to stop. Any manual navigation stops auto-play.
-- **Import/export a game**: the **Import PGN game** button (a document with an
-  incoming arrow) in the PGN panel opens a dialog to paste PGN text and load
-  the game with its variations; the **Export PGN game** button (a document
-  with an outgoing arrow) downloads the current game as `chesstb_game.pgn`
-  with standard headers.
+- **Import/export a game**: **Import** in the PGN panel (tooltip
+  **Import PGN**) opens a dialog to paste PGN text and load the game with
+  its variations; **Export** (tooltip **Export PGN**) downloads the
+  current game as `chesstb_game.pgn` with standard headers. Each button shows a
+  document icon with an arrow, and its label when the panel header is wide
+  enough.
 - **Export the move table**: the **CSV** button downloads the current
   DTZ/DTC/DTM/DTM50 rankings as a CSV file.
 - **Share a position**: the URL updates live with `#fen=...`; sending
@@ -866,7 +892,7 @@ curl -X POST http://127.0.0.1:7860/probe \
 
 | Symptom | Likely cause |
 |---|---|
-| Every probe returns "Position not covered by the loaded tablebase." | `TABLEBASE_PATH` is unset or wrong, or none of the `TABLEBASE_PATH` entries carries the position's material, for example a castling-rights position when no entry covers castling tables (see [Getting the tablebase files](#getting-the-tablebase-files)). Check the startup log for "TABLEBASE_PATH opened at: ..." (or "opened remotely at: ...") or a warning. |
+| Every probe returns "Position not covered by the loaded tablebase." | `TABLEBASE_PATH` is unset or wrong, or none of the `TABLEBASE_PATH` entries carries the position's material, for example a castling-rights position when no entry covers castling tables (see [Getting the tablebase files](#getting-the-tablebase-files)). A single path uses its `full/` and `castling/` subdirectories, so a root with a different layout needs an explicit list. Check the startup log for "TABLEBASE_PATH opened at: ..." (or "opened remotely at: ...") or a warning. |
 | A FEN is rejected with "Invalid castling availability" | The submitted castling-availability field is something other than `-` or a combination of `K`, `Q`, `k`, `q` (or, in Chess960 Mode, rook-file letters `a`-`h`/`A`-`H`), or names a castling right without a matching king and rook on the board. |
 | A FEN with `a`-`h`/`A`-`H` castling-rights letters is rejected even though the position looks fine | Those letters are only accepted with **Chess960 Mode** on (settings panel, or `variant: "chess960"` on the API) - Standard mode only accepts `K`, `Q`, `k`, `q`, matching Standard chess's fixed castling-rook squares. |
 | Dragging a king onto its own rook doesn't castle | **Chess960 Mode** is off - enable it in the settings panel (or send `variant: "chess960"` on the API) for Chess960-style king-onto-rook castling; in Standard mode a king can only reach its rook's square by regular king movement. |

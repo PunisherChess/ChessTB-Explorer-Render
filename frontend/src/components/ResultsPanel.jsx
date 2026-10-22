@@ -91,15 +91,15 @@ function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autop
 
     return (
         <Panel
-            className={`results-panel${tb.loading ? ' is-loading' : ''}`}
+            className={`results-panel${tb.pending ? ' is-pending' : ''}${tb.loading ? ' is-loading' : ''}`}
             label="Tablebase results" title="Tablebase Result"
             start={
-                <>
+                <div className="probe-status" style={{ display: tb.progress.visible ? 'flex' : 'none' }}>
                     <span id="probe-progress-label" className="probe-progress-label" aria-live="polite">{tb.progress.label}</span>
-                    <div id="probe-progress" className="probe-progress" style={{ display: tb.progress.visible ? 'block' : 'none' }} aria-hidden="true">
-                        <div className="probe-progress__fill" style={{ width: `${tb.progress.pct}%` }}></div>
+                    <div id="probe-progress" className={`probe-progress${tb.progress.pct === null ? ' is-indeterminate' : ''}`} aria-hidden="true">
+                        <div className="probe-progress__fill" style={{ width: tb.progress.pct === null ? undefined : `${tb.progress.pct}%` }}></div>
                     </div>
-                </>
+                </div>
             }
             end={
                 <>
@@ -164,7 +164,7 @@ function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autop
 
                     <div id="moves-empty-state" className="moves-empty-state" style={{ display: tb.emptyState ? 'flex' : 'none' }} aria-live="polite">
                         <span className="moves-empty-state__icon" aria-hidden="true">♟</span>
-                        <p>Probe a position to see the tablebase ranking of each legal move.</p>
+                        <p>{tb.emptyMessage}</p>
                     </div>
                 </div>
             </div>

@@ -23,10 +23,13 @@ Design
   and "give me bytes [offset, offset+length) of `<base_url>/<path>`", and
   keeps a running count of every HTTP request it issues and every
   response byte it receives, available via :meth:`RemoteHTTPClient.stats`.
-  Its session mounts an ``HTTPAdapter`` sized to the caller's expected
-  concurrency (``pool_maxsize``, normally set from ``PROBE_THREADS``) so
-  concurrent requests reuse warm connections instead of opening fresh
-  ones once the default pool is exhausted, and its retry loop backs off
+  A signed redirect target with an ``Expires`` time is cached per URL and
+  reused until 60 seconds before it expires; a failing cached target is
+  retried through the original URL. Its session mounts an ``HTTPAdapter``
+  sized to the caller's expected concurrency (``pool_maxsize``, normally
+  set from ``PROBE_THREADS``) so concurrent requests reuse warm
+  connections instead of opening fresh ones once the default pool is
+  exhausted, and its retry loop backs off
   between attempts -- honoring a ``Retry-After`` header when the server
   sends one -- rather than retrying instantly into a struggling or
   rate-limiting CDN edge.
@@ -63,6 +66,7 @@ import threading
 import time
 import weakref
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlsplit
 
 try:
     import requests  # type: ignore
@@ -107,9 +111,8 @@ DEFAULT_MAX_RETRIES = 3
 
 #: Default HTTP connection pool size for a client's underlying
 #: ``requests.Session``, used when the caller (normally app.py, sizing
-#: this against ``PROBE_THREADS``) does not specify one explicitly. One
-#: RemoteHTTPClient talks to a single host, so all of this budget goes to
-#: that one pool.
+#: this against ``PROBE_THREADS``) does not specify one explicitly. Each
+#: host gets its own pool of this size: the resolver and the signed CDN host.
 DEFAULT_POOL_MAXSIZE = 20
 
 #: Cap (seconds) on the exponential backoff between retried requests --
@@ -297,19 +300,21 @@ class RemoteHTTPClient:
         self.timeout = timeout
         self.max_retries = max(1, max_retries)
         self._session = requests.Session()
-        # One host per client, so one pool's worth of connections is all
-        # this ever needs -- sized to the caller's expected concurrency
-        # rather than left at requests' default of 10, which PROBE_THREADS
-        # alone can exceed. max_retries=0 here: retrying is this class's
-        # own job (see get_range/get_first_page), not urllib3's.
+        # Pools for the resolver and CDN hosts, each sized to the caller's
+        # expected concurrency rather than left at requests' default of 10,
+        # which PROBE_THREADS alone can exceed. max_retries=0 here: retrying
+        # is this class's own job (see get_range/get_first_page), not
+        # urllib3's.
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=1, pool_maxsize=max(1, pool_maxsize), max_retries=0,
+            pool_connections=4, pool_maxsize=max(1, pool_maxsize), max_retries=0,
         )
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
         self._stats_lock = threading.Lock()
         self._requests = 0
         self._bytes_fetched = 0
+        self._resolve_lock = threading.Lock()
+        self._resolved: Dict[str, Tuple[str, float]] = {}
 
     def _record(self, nbytes: int = 0) -> None:
         """Count one HTTP round trip -- successful or not -- and however
@@ -322,6 +327,8 @@ class RemoteHTTPClient:
         """Release the session's connection pool. Safe to call more than
         once -- ``requests.Session.close()`` itself is idempotent."""
         self._session.close()
+        with self._resolve_lock:
+            self._resolved.clear()
 
     def stats(self) -> Dict[str, int]:
         """Total HTTP requests issued and response bytes received through
@@ -331,6 +338,43 @@ class RemoteHTTPClient:
 
     def url_for(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
+
+    def _request(self, method: str, path: str, **kwargs):
+        """Issues a request for `path`, reusing a cached signed redirect target
+        until 60 seconds before its ``Expires`` time. A cached target that
+        fails is dropped and the request is retried through the original URL."""
+        origin = self.url_for(path)
+        with self._resolve_lock:
+            cached = self._resolved.get(origin)
+            if cached is not None and cached[1] <= time.time():
+                self._resolved.pop(origin, None)
+                cached = None
+        kwargs.setdefault("allow_redirects", True)
+        if cached is not None:
+            try:
+                response = self._session.request(method, cached[0], **kwargs)
+            except requests.RequestException:
+                response = None
+            if response is not None and 200 <= response.status_code < 300:
+                return response
+            self._record()
+            if response is not None:
+                response.close()
+            with self._resolve_lock:
+                if self._resolved.get(origin) == cached:
+                    self._resolved.pop(origin, None)
+
+        response = self._session.request(method, origin, **kwargs)
+        if 200 <= response.status_code < 300 and response.url != origin:
+            try:
+                expiry = int(parse_qs(urlsplit(response.url).query)["Expires"][0]) - 60
+            except (KeyError, ValueError, IndexError):
+                pass
+            else:
+                if expiry > time.time():
+                    with self._resolve_lock:
+                        self._resolved[origin] = (response.url, expiry)
+        return response
 
     def head_size(self, path: str) -> Optional[int]:
         """Return `path`'s size in bytes, or ``None`` if it doesn't exist.
@@ -347,7 +391,7 @@ class RemoteHTTPClient:
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
-                resp = self._session.head(url, timeout=self.timeout, allow_redirects=True)
+                resp = self._request("HEAD", path, timeout=self.timeout)
             except requests.RequestException:
                 resp = None  # fall through to the ranged-GET probe below
             if resp is not None:
@@ -360,7 +404,7 @@ class RemoteHTTPClient:
                         return int(cl)
 
             try:
-                resp = self._session.get(url, headers={"Range": "bytes=0-0"}, timeout=self.timeout)
+                resp = self._request("GET", path, headers={"Range": "bytes=0-0"}, timeout=self.timeout)
             except requests.RequestException as exc:
                 self._record()
                 last_exc = RemoteSourceError(f"Failed to reach {url}: {exc}")
@@ -401,8 +445,8 @@ class RemoteHTTPClient:
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
-                resp = self._session.get(
-                    url, headers={"Range": f"bytes={offset}-{end}"},
+                resp = self._request(
+                    "GET", path, headers={"Range": f"bytes={offset}-{end}"},
                     timeout=self.timeout, stream=True,
                 )
             except requests.RequestException as exc:
@@ -478,8 +522,8 @@ class RemoteHTTPClient:
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
-                resp = self._session.get(
-                    url, headers={"Range": f"bytes=0-{page_size - 1}"},
+                resp = self._request(
+                    "GET", path, headers={"Range": f"bytes=0-{page_size - 1}"},
                     timeout=self.timeout, stream=True,
                 )
             except requests.RequestException as exc:

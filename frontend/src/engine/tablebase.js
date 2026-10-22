@@ -8,10 +8,15 @@
  *   - setNoteHandler(fn) - callback with the message of a warning or info
  *     dot tapped with touch or pen input.
  *   - setViewStateHandler(fn) - callback with a plain object describing
- *     everything the results panel needs to render (loading/progress/error,
- *     the Root row, and the ranked move rows). Rendering itself is the
- *     caller's responsibility; this module never touches the DOM to draw
- *     the table.
+ *     everything the results panel needs to render (pending/loading/
+ *     progress/error, the Root row, the ranked move rows, and the message
+ *     for an empty table). Rendering itself is the caller's responsibility;
+ *     this module never touches the DOM to draw the table.
+ *   - A pending state from the moment a probe is scheduled until its result
+ *     applies: rows from the previous position cannot be selected. The
+ *     loading state (blanked table, progress bar) begins only after
+ *     _LOADING_DELAY_MS from the probe being issued, so a fast or cached
+ *     result does not flash an empty table.
  *   - attachTableEvents(tbody) - wires click-to-play, hover pairing, and
  *     hover-triggered prefetch onto the actual rendered <tbody>. Returns a
  *     cleanup function.
@@ -36,8 +41,10 @@ import { VARIANTS, METRICS, STORAGE_KEYS } from './constants.js';
 import * as Storage from './storage.js';
 
 const _METRIC_GROUPS = Object.keys(METRICS).map(id => `group-${id}`);
-const _PROGRESS_IDLE    = Object.freeze({ visible: false, pct: 0, label: '' });
-const _PROGRESS_STARTED = Object.freeze({ visible: true,  pct: 0, label: 'Probing…' });
+const _PROGRESS_IDLE     = Object.freeze({ visible: false, pct: 0, label: '' });
+const _PROGRESS_CHECKING = Object.freeze({ visible: true, pct: null, label: 'Checking position…' });
+const _LOADING_DELAY_MS  = 180;
+const _EMPTY_MESSAGE     = 'Choose a position to see its best moves.';
 
 // ── Bounded LRU cache ────────────────────────────────────────────────────
 const _MAX_CACHE_ENTRIES = 500;
@@ -68,6 +75,8 @@ const Tablebase = (() => {
 
     let _currentController = null;
     let _probeSeq    = 0;
+    let _loadingTimer = null;
+    let _pendingProgress = _PROGRESS_CHECKING;   // latest progress, shown once loading begins
     let _onMoveSelect = null;
     let _onNote       = null;
     let _onResult     = null;
@@ -253,6 +262,7 @@ const Tablebase = (() => {
     // Single object describing everything the results panel renders.
     // Rebuilt on every meaningful change and pushed to _onViewState.
     let _viewState = {
+        pending: false,
         loading: false,
         progress: _PROGRESS_IDLE,
         error: null,               // { message, isCoverage } | null
@@ -260,10 +270,31 @@ const Tablebase = (() => {
         rootRow: null,             // { cells: [...] } | null
         rows: [],                  // [{ rank, cells: [...] }]
         emptyState: true,
+        emptyMessage: _EMPTY_MESSAGE,
     };
     function _publish(patch) {
         _viewState = { ..._viewState, ...patch };
         if (_onViewState) _onViewState(_viewState);
+    }
+
+    // Marks the table pending while a probe is scheduled but not yet issued.
+    // An in-flight probe belongs to a previous position and is superseded.
+    function markPending() {
+        _probeSeq++;
+        clearTimeout(_loadingTimer);
+        if (_currentController) { _currentController.abort(); _currentController = null; }
+        _publish({ pending: true });
+    }
+
+    function _beginLoading(mySeq) {
+        clearTimeout(_loadingTimer);
+        _pendingProgress = _PROGRESS_CHECKING;
+        _publish({ pending: true, error: null, ...(_viewState.loading ? { progress: _pendingProgress } : {}) });
+        _loadingTimer = setTimeout(() => {
+            if (mySeq !== _probeSeq) return;
+            _blankResults();
+            _publish({ loading: true, progress: _pendingProgress });
+        }, _LOADING_DELAY_MS);
     }
 
     function _rootRowState(data, fen) {
@@ -311,7 +342,16 @@ const Tablebase = (() => {
         return !(data && data.summary && data.summary.unknown > 0);
     }
 
+    function _emptyMessage(data, maxRows) {
+        if (data.draw_reason === 'insufficient_material') return 'Draw by insufficient material.';
+        if (data.draw_reason === 'stalemate') return 'Stalemate. No legal moves.';
+        if (data.wdl === -2 && maxRows === 0) return 'Checkmate. No legal moves.';
+        if (data.wdl === 0) return 'Draw.';
+        return 'No ranked moves for this position.';
+    }
+
     function _applyResults(data, fen, variant) {
+        clearTimeout(_loadingTimer);
         _lastData    = data;
         _lastFen     = fen;
         _lastVariant = variant;
@@ -321,26 +361,33 @@ const Tablebase = (() => {
         const maxRows = rows.length;
 
         _publish({
+            pending: false,
             loading: false,
+            progress: _PROGRESS_IDLE,
+            error: null,
             rootRow: _rootRowState(data, fen),
             rows,
             emptyState: maxRows === 0,
+            emptyMessage: _emptyMessage(data, maxRows),
             moveCount: maxRows > 0 ? `${maxRows} legal move${maxRows === 1 ? '' : 's'}` : '',
         });
         if (_onResult) _onResult(data);
     }
 
     function _applyCachedResult(data, fen, variant, mySeq) {
-        _publish({ loading: true });
+        clearTimeout(_loadingTimer);
         Promise.resolve().then(() => {
             if (mySeq !== _probeSeq) return;
             _applyResults(data, fen, variant);
-            _publish({ error: null });
         });
     }
 
     function _reset() {
-        _publish({ loading: false, rootRow: _rootRowState(null, _lastFen), rows: [], emptyState: false, error: null });
+        clearTimeout(_loadingTimer);
+        _publish({
+            pending: false, loading: false, progress: _PROGRESS_IDLE,
+            rootRow: _rootRowState(null, _lastFen), rows: [], emptyState: false, error: null,
+        });
         _lastData    = null;
         _lastFen     = null;
         _lastVariant = null;
@@ -383,14 +430,20 @@ const Tablebase = (() => {
         }
     }
 
-    // Publishes a progress update only when what is shown would change - the
-    // server can emit several events that round to the same label.
-    function _publishProgress(evtData) {
+    // Records a progress update of probe `mySeq`, ignoring a superseded probe's
+    // events. It is shown only once loading has begun, and only when the label
+    // changes - the server can emit several events that round to the same label.
+    function _publishProgress(evtData, mySeq) {
+        if (mySeq !== _probeSeq) return;
         const hasTotal = evtData.total > 0;
-        const label = hasTotal ? `Probing ${evtData.completed}/${evtData.total}…` : 'Probing…';
-        const prev = _viewState.progress;
-        if (prev.visible && prev.label === label) return;
-        _publish({ progress: { visible: true, pct: hasTotal ? Math.round((evtData.completed / evtData.total) * 100) : 0, label } });
+        const label = hasTotal ? `Evaluating moves · ${evtData.completed}/${evtData.total}` : 'Preparing result…';
+        if (_pendingProgress.label === label) return;
+        _pendingProgress = {
+            visible: true,
+            pct: hasTotal ? Math.round((evtData.completed / evtData.total) * 100) : null,
+            label,
+        };
+        if (_viewState.loading) _publish({ progress: _pendingProgress });
     }
 
     // Resolves with the final 'done' event; rejects with the error payload
@@ -422,6 +475,7 @@ const Tablebase = (() => {
 
     function probe(fen, variant, onError) {
         const mySeq = ++_probeSeq;
+        clearTimeout(_loadingTimer);
         if (_currentController) { _currentController.abort(); _currentController = null; }
         const key = _cacheKey(fen, variant);
 
@@ -429,18 +483,15 @@ const Tablebase = (() => {
             if (_prefetchController && _prefetchPromise) {
                 _prefetchAttached = true;
                 const waitingOn = _prefetchPromise;
-                _blankResults();
-                _publish({ loading: true, progress: _PROGRESS_STARTED });
+                _beginLoading(mySeq);
                 waitingOn.then(outcome => {
                     _prefetchAttached = false;
                     if (mySeq !== _probeSeq) return;
-                    _publish({ progress: _PROGRESS_IDLE });
                     if (outcome.ok) {
                         _applyResults(outcome.data, fen, variant);
-                        _publish({ error: null });
-                    } else if (!outcome.aborted) {
+                    } else {
                         _reset();
-                        _handleError(outcome.error && outcome.error.error ? outcome.error : { error: 'Cannot reach backend.' }, onError);
+                        if (!outcome.aborted) _handleError(outcome.error && outcome.error.error ? outcome.error : { error: 'Cannot reach backend.' }, onError);
                     }
                 });
                 return;
@@ -457,27 +508,23 @@ const Tablebase = (() => {
         const myController = _currentController;
         const signal       = myController.signal;
 
-        _blankResults();
-        _publish({ loading: true, progress: _PROGRESS_STARTED });
+        _beginLoading(mySeq);
 
-        _probeStream(fen, variant, signal, _publishProgress)
+        _probeStream(fen, variant, signal, evtData => _publishProgress(evtData, mySeq))
             .then(data => {
                 if (mySeq !== _probeSeq) return;
                 if (_currentController === myController) _currentController = null;
-                _publish({ progress: _PROGRESS_IDLE });
                 if (data.error) {
                     _reset();
                     _handleError(data, onError);
                 } else {
                     _applyResults(data, fen, variant);
-                    _publish({ error: null });
                 }
             })
             .catch(err => {
                 if (err && err.name === 'AbortError') return;
                 if (mySeq !== _probeSeq) return;
                 if (_currentController === myController) _currentController = null;
-                _publish({ progress: _PROGRESS_IDLE });
                 _reset();
                 _handleError(err && err.error ? err : { error: 'Cannot reach backend.' }, onError);
                 console.error('[Tablebase]', err);
@@ -626,6 +673,7 @@ const Tablebase = (() => {
 
         function onPointerdown(e) { lastPointerType = e.pointerType; }
         function onClick(e) {
+            if (_viewState.pending) return;
             const type = e.pointerType || lastPointerType;
             lastPointerType = '';
             const dot = e.target.closest('.warning-dot, .info-dot');
@@ -637,6 +685,7 @@ const Tablebase = (() => {
             if (cell && _onMoveSelect) _onMoveSelect(cell.dataset.san);
         }
         function onKeydown(e) {
+            if (_viewState.pending) return;
             if (e.key !== 'Enter' && e.key !== ' ') return;
             const cell = e.target.closest('td[data-san]');
             if (cell && _onMoveSelect) { e.preventDefault(); _onMoveSelect(cell.dataset.san); }
@@ -681,7 +730,7 @@ const Tablebase = (() => {
     function notifyTableRendered() { _reapplyOnNextRender(); }
 
     return {
-        probe, setMoveSelectHandler, setNoteHandler, setResultHandler, getLastData, getLastFen, getLastVariant,
+        probe, markPending, setMoveSelectHandler, setNoteHandler, setResultHandler, getLastData, getLastFen, getLastVariant,
         setShowRootRow, getShowRootRow, clearErrorLine, setMoveCount, exportCsv,
         setViewStateHandler, getViewState, attachTableEvents, notifyTableRendered,
     };
