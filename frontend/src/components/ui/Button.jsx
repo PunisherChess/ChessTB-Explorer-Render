@@ -1,3 +1,5 @@
+/** Button.jsx: shared button primitive */
+
 import Icon from './Icon.jsx';
 
 export default function Button({ variant, compact, grow, iconOnly, icon, className = '', children, ...rest }) {

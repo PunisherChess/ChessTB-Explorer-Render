@@ -1,3 +1,5 @@
+/** BoardArea.jsx: chessboard with piece trays and side-to-move control */
+
 import { memo } from 'react';
 import Segmented from './ui/Segmented.jsx';
 

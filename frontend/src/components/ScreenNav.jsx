@@ -1,3 +1,5 @@
+/** ScreenNav.jsx: screen navigation bar for the phone layout */
+
 import { memo, useEffect, useState } from 'react';
 
 const SCREENS = ['Board', 'Results', 'Moves'];

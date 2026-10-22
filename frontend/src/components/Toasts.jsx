@@ -1,3 +1,5 @@
+/** Toasts.jsx: toast notification container */
+
 import { memo } from 'react';
 
 function Toasts({ toasts }) {

@@ -29,14 +29,14 @@ services:
     # shows up as slower probes rather than incorrect ones. Since probing
     # (tablebase block decompression) is CPU-bound, a dedicated-vCPU plan
     # such as "starter" is worth the upgrade for a deployment expecting
-    # real traffic -- see README.md "Deploying to Render" for more on
+    # real traffic - see README.md "Deploying to Render" for more on
     # sizing.
     plan: free
     region: oregon   # Region for the Render service.
 
     # Matches the GET /health route in app.py: 200 once TABLEBASE_PATH has
-    # opened successfully, 503 ("degraded") otherwise -- so Render won't
-    # mark a deploy healthy until a tablebase is actually reachable and
+    # opened successfully, 503 ("degraded") otherwise - so Render won't
+    # mark a deploy healthy until a tablebase is reachable and
     # probing.
     healthCheckPath: /health
 
@@ -45,21 +45,21 @@ services:
       # prompted for here (sync: false) instead of hardcoded. Point this
       # at an http(s):// base URL serving the ChessTB layout remotely
       # (see README.md "Getting the tablebase files"), or at several
-      # comma-separated URLs tried left-to-right -- REMOTE_MODE
+      # comma-separated URLs tried left-to-right - REMOTE_MODE
       # defaults to "direct" in config.py, so nothing is written to
       # Render's (ephemeral, and for a set this size, impractically
       # small and expensive) local disk.
       - key: TABLEBASE_PATH
         sync: false
 
-      # Both generated automatically -- Render fills in a random value
+      # Both generated automatically - Render fills in a random value
       # at deploy time and stores it as a secret env var. Rotate either
       # from the service's "Environment" tab in the Render Dashboard at
       # any time; app.py picks up the new value on the next restart.
       # ADMIN_TOKEN gates /admin and /admin/cache/*; leaving it
-      # ungenerated (delete the block below) is also valid -- those
+      # ungenerated (delete the block below) is also valid - those
       # routes respond 503 until a token is set, the same as when
-      # ADMIN_TOKEN is left unset entirely.
+      # ADMIN_TOKEN is left unset.
       - key: ADMIN_TOKEN
         generateValue: true
       - key: FLASK_SECRET_KEY
@@ -76,7 +76,7 @@ services:
 
       # Not set here: PORT is injected by Render itself at deploy time,
       # and config.py already reads it (falling back to 7860 only when
-      # PORT isn't present, e.g. running the same image locally) -- see
+      # PORT isn't present, e.g. running the same image locally) - see
       # config.py's "Server" section. GITHUB_URL is also left unset;
       # add it as a plain env var from the dashboard, or edit the
       # literal default in config.py, to enable the header's GitHub button.

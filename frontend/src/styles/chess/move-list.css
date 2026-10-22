@@ -132,7 +132,7 @@
 }
 /* A variation paragraph holds more than one move, so - unlike a
    main-line cell - each move is its own hover/click target: a tight
-   chip around just that move's text. */
+   chip around only that move's text. */
 .move-line__move--chip {
     color: inherit;
     font-size: inherit;

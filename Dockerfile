@@ -7,7 +7,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user rather than the image's default root. UID 1000 has
-# no special meaning to Render (it just needs to own /app below); it
+# no special meaning to Render (it only needs to own /app below); it
 # matches Hugging Face Docker Spaces' convention, so the same image also
 # runs there.
 RUN useradd -m -u 1000 user
@@ -29,9 +29,9 @@ ENV HOME=/home/user
 ENV PATH=/home/user/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 
-# Purely informational -- config.py's PORT reads the platform's own PORT
+# Purely informational - config.py's PORT reads the platform's own PORT
 # environment variable at runtime (falling back to 7860 only when it's
-# unset) and that's the port actually bound, regardless of this EXPOSE
+# unset) and that's the port bound, regardless of this EXPOSE
 # value. Render assigns and injects PORT itself (see render.yaml /
 # README.md "Deploying to Render"), so nothing needs to change here to
 # match it; 7860 is the default for a local `docker run` with no PORT set,

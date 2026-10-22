@@ -1,3 +1,5 @@
+/** scroll.js: scrolls an element into view within a container only */
+
 // Scrolls `el` into view within `container` only - never any ancestor
 // beyond it (unlike Element.scrollIntoView(), which would also drag the
 // mobile screen-carousel over to whichever panel is calling this).

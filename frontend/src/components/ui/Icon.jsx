@@ -1,3 +1,5 @@
+/** Icon.jsx: inline SVG icon set */
+
 const STROKE_WIDTH = { check: 2.5, close: 2.5 };
 
 const PATHS = {

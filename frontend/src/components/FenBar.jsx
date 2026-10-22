@@ -1,3 +1,5 @@
+/** FenBar.jsx: FEN input and board action buttons */
+
 import { memo } from 'react';
 import Button from './ui/Button.jsx';
 import Icon from './ui/Icon.jsx';
@@ -36,7 +38,7 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
                             className={`btn btn--icon-only btn--lock${locked ? ' is-locked' : ''}${lockAutoplayDisabled ? ' is-autoplay-disabled' : ''}`}
                             aria-pressed={locked} aria-disabled={lockAutoplayDisabled}
                             aria-label="Lock board to legal moves only"
-                            title={lockAutoplayDisabled ? 'Stop auto-play to change Lock' : (locked ? 'Unlock board' : 'Lock board (legal moves only)')}
+                            title={lockAutoplayDisabled ? 'Locked during auto-play' : (locked ? 'Play mode: unlock to edit the position' : 'Edit mode: lock to play legal moves')}
                             onClick={onLockClick}>
                         <Icon name="lockOpen" className="btn__icon lock-icon lock-icon--unlocked" />
                         <Icon name="lockClosed" className="btn__icon lock-icon lock-icon--locked" />

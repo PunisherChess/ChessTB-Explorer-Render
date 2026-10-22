@@ -1,5 +1,5 @@
-"""Byte-range ChessTB tablebase access: probe remote tables in place,
-fetching only the bytes each probe touches.
+"""remote_direct.py: byte-range ChessTB tablebase access that probes remote
+tables in place, fetching only the bytes each probe touches.
 
 How this differs from remote_fallback.py
 ----------------------------------------
@@ -21,7 +21,7 @@ exactly that page next anyway.
 Trade-off against remote_fallback.py
 ------------------------------------
 Cold cost is "a handful of 256 KiB pages" rather than "one full table
-download", and ``REMOTE_PAGE_CACHE_BYTES`` bounds memory only -- nothing
+download", and ``REMOTE_PAGE_CACHE_BYTES`` bounds memory only - nothing
 is written to disk here at all.
 
 The cost is per-read CPU. Against a mapping, the hot 8-byte bit-window
@@ -73,7 +73,7 @@ class _RemoteTablebase(chesstb.Tablebase):
         # across the cache's shards.
         self._page_cache = remote_source._PageCache(remote_page_cache_bytes)
         self._page_size = remote_page_size
-        # A cached None means "asked, no such table" -- same contract as the
+        # A cached None means "asked, no such table" - same contract as the
         # open caches upstream keeps, so a missing material costs one HEAD
         # for the session rather than one per probe.
         self._sizes: Dict[str, Optional[int]] = {}
@@ -83,7 +83,7 @@ class _RemoteTablebase(chesstb.Tablebase):
     def add_directory(self, base_dir: str) -> None:
         """No-op. The base class's version os.path.joins kind
         subdirectories onto ``base_dir`` and stashes the result in
-        ``self.dirs`` for ``_find`` to search -- this subclass's own
+        ``self.dirs`` for ``_find`` to search - this subclass's own
         ``_find`` below builds ``"<kind>/<name><ext>"`` relative to the
         remote base URL directly and never consults ``self.dirs``."""
 
@@ -132,8 +132,8 @@ class _RemoteTablebase(chesstb.Tablebase):
                 self._client.close()
 
     def clear_caches(self) -> None:
-        """Drop decoded blocks and fetched pages, keeping open tables open
-        -- reopening would only re-fetch the same headers immediately."""
+        """Drop decoded blocks and fetched pages, keeping open tables open;
+        reopening would only re-fetch the same headers immediately."""
         self._block_cache.clear()
         self._page_cache.clear()
 

@@ -1,7 +1,7 @@
-"""Per-material table opening; all table decoding/probing stays upstream.
+"""tablebase_opening.py: per-material table opening; all table decoding/probing stays upstream.
 
 The router resolves through a source's _find(), not its _open_*() methods.
-Consequently per-material locking must live on the tablebase which actually
+Consequently per-material locking must live on the tablebase which
 owns the opened files. This module holds one small copy of upstream's
 double-checked open contract and the block-cache accessor shared by the
 router and the remote sources.

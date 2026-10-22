@@ -4,7 +4,7 @@
 .results-panel.is-loading .moves-view { opacity: .55; pointer-events: none; }
 /* The auto-play "stop" control must stay clickable even while a probe is in
    flight - otherwise there's only a brief window between probe cycles where
-   auto-play can actually be turned off. */
+   auto-play can be turned off. */
 .results-panel.is-loading .btn--col-autoplay { pointer-events: auto; opacity: 1; }
 
 /* Shown only in the compact table view (see the `results` container query below). */

@@ -39,7 +39,7 @@ paths:
           description: Request body exceeds 4 KB limit
         "429":
           description: >-
-            Rate limit exceeded -- PROBE_RATE_LIMIT per client IP, or the
+            Rate limit exceeded: PROBE_RATE_LIMIT per client IP, or the
             separate, tighter PREFETCH_RATE_LIMIT when the request carries
             "X-Prefetch: 1" (see that parameter above). Retrying after a
             short wait should succeed.
@@ -116,11 +116,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           description: >-
-            Rate limit exceeded, returned before the stream opens --
+            Rate limit exceeded, returned before the stream opens:
             PROBE_RATE_LIMIT per client IP, or the separate, tighter
             PREFETCH_RATE_LIMIT when the request carries "X-Prefetch: 1"
             (see that parameter above; this is the endpoint the
-            frontend's hover-prefetch actually sets it on). Retrying
+            frontend's hover-prefetch sets it on). Retrying
             after a short wait should succeed.
           content:
             application/json:
@@ -232,7 +232,7 @@ components:
       description: >-
         Set to "1" by the frontend's hover-prefetch (frontend/src/engine/tablebase.js)
         to route this request to PREFETCH_RATE_LIMIT instead of
-        PROBE_RATE_LIMIT -- a separate, tighter per-client-IP budget, never
+        PROBE_RATE_LIMIT - a separate, tighter per-client-IP budget, never
         an exemption from rate limiting (see app.py's _request_probe_limit).
         A real, user-initiated probe should not set this header.
   schemas:
@@ -543,7 +543,7 @@ components:
           type: boolean
           description: >-
             Whether the underlying chess.chesstb block cache was also
-            cleared, not just this app's own two LRUs above.
+            cleared, not only this app's own two LRUs above.
         tablebase_cache:
           type: object
           description: >-

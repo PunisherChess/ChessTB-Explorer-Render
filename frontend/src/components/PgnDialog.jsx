@@ -1,3 +1,5 @@
+/** PgnDialog.jsx: PGN import dialog */
+
 import { memo, useEffect, useRef } from 'react';
 import Button from './ui/Button.jsx';
 

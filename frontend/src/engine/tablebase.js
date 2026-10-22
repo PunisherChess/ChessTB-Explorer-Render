@@ -1,5 +1,5 @@
 /**
- * tablebase.js - /probe/stream SSE client and results state
+ * tablebase.js: /probe/stream SSE client and results state
  *
  * Owns the SSE client for /probe/stream and all state for the four ranked
  * move tables (DTZ / DTC / DTM / DTM50):
@@ -154,13 +154,13 @@ const Tablebase = (() => {
         return `${n} ${_plural(n)}/${entry.orderText}`;
     }
 
-    const _ROUNDED_NOTE = 'Rounded Score — this could be off by 1 ply.';
+    const _ROUNDED_NOTE = 'Rounded Score - this could be off by 1 ply.';
 
     function _warningText(entry) {
         const text = entry.outcome === 'cursed_win'
-            ? 'Cursed Win — a win in principle, but a draw under the 50-move rule.'
+            ? 'Cursed Win - a win in principle, but a draw under the 50-move rule.'
             : entry.outcome === 'blessed_loss'
-                ? 'Blessed Loss — a loss in principle, but a draw under the 50-move rule.'
+                ? 'Blessed Loss - a loss in principle, but a draw under the 50-move rule.'
                 : null;
         return text && entry.rounded ? `${text}\n${_ROUNDED_NOTE}` : text;
     }
@@ -342,12 +342,14 @@ const Tablebase = (() => {
         return !(data && data.summary && data.summary.unknown > 0);
     }
 
-    function _emptyMessage(data, maxRows) {
-        if (data.draw_reason === 'insufficient_material') return 'Draw by insufficient material.';
-        if (data.draw_reason === 'stalemate') return 'Stalemate. No legal moves.';
-        if (data.wdl === -2 && maxRows === 0) return 'Checkmate. No legal moves.';
-        if (data.wdl === 0) return 'Draw.';
-        return 'No ranked moves for this position.';
+    function _emptyMessage(data, maxRows, fen) {
+        if (data.draw_reason === 'insufficient_material') return 'Draw by insufficient material';
+        if (data.draw_reason === 'stalemate') return 'Draw by Stalemate';
+        if (data.wdl === -2 && maxRows === 0) {
+            return `Checkmate - ${fen.split(' ')[1] === 'w' ? 'Black' : 'White'} wins`;
+        }
+        if (data.wdl === 0) return 'Draw';
+        return 'No ranked moves for this position';
     }
 
     function _applyResults(data, fen, variant) {
@@ -368,7 +370,7 @@ const Tablebase = (() => {
             rootRow: _rootRowState(data, fen),
             rows,
             emptyState: maxRows === 0,
-            emptyMessage: _emptyMessage(data, maxRows),
+            emptyMessage: _emptyMessage(data, maxRows, fen),
             moveCount: maxRows > 0 ? `${maxRows} legal move${maxRows === 1 ? '' : 's'}` : '',
         });
         if (_onResult) _onResult(data);
@@ -709,7 +711,7 @@ const Tablebase = (() => {
         tbody.addEventListener('mouseover', onMouseover);
         tbody.addEventListener('mouseleave', onMouseleave);
 
-        // The pointer may already be sitting over a cell that just
+        // The pointer may already be sitting over a cell that
         // (re)appeared without itself moving - ResultsPanel calls
         // notifyTableRendered() after every render to re-check.
         _reapplyOnNextRender = reapplyHoverAtPointer;

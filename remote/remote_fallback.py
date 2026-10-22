@@ -1,4 +1,4 @@
-"""Remote (HTTP) ChessTB tablebase support for the standard
+"""remote_fallback.py: remote (HTTP) ChessTB tablebase support for the standard
 ``chess.chesstb`` module (noobpwnftw's python-chess fork, see
 requirements.txt), selected through tablebase_router when
 ``config.REMOTE_MODE`` is ``"download"``.
@@ -10,7 +10,7 @@ Why this exists
 ``os.open()`` and memory-maps it (``mmap.mmap(..., access=mmap.ACCESS_READ)``),
 and ``Tablebase._find()`` always checks candidates on the local filesystem.
 ``_open_source`` is itself a documented seam another transport can
-replace -- ``remote_direct.py`` does exactly that, reading HTTP byte
+replace - ``remote_direct.py`` does exactly that, reading HTTP byte
 ranges on demand. This module takes the simpler of the two
 approaches: it leaves ``_open_source`` untouched and overrides only
 ``_find``, described below.
@@ -20,18 +20,18 @@ override only the file-resolution step (``_find``): the first time a
 probe touches a given material, the corresponding remote table file is
 fetched in full and written to a local per-process cache directory, and
 the resulting local path is handed unchanged to the standard, untouched
-``WDLFile``/``DTZFile``/``DTCFile``/``DTMFile``/``DTM50File`` constructors --
-which run completely unaware they're not reading from a hand-picked local
+``WDLFile``/``DTZFile``/``DTCFile``/``DTMFile``/``DTM50File`` constructors,
+which run unaware they're not reading from a hand-picked local
 directory. Every
 other behaviour (probing, index maths, block decoding, ``MissingTableError``,
 the ``WIN``/``DRAW``/... constants, ``ProbeResult``) is the standard
-module's own, unmodified implementation -- this module only changes *how a
+module's own, unmodified implementation - this module only changes *how a
 table's bytes reach disk*, never what they mean once there.
 
 A whole table file is downloaded the first time any position touches
 that material, rather than only the specific byte ranges (header/index
 plus whichever compressed blocks the position's index falls into) a probe
-actually needs -- there's no way to get bytes in front of code that only
+needs - there's no way to get bytes in front of code that only
 ever calls ``open()`` on a path other than putting real bytes at that
 path first (see ``remote_direct.py`` for the byte-range alternative,
 which reads through ``remote_source.RemoteFileView`` instead). Once
@@ -81,12 +81,12 @@ class _RemoteDiskCache:
     one layer up the stack: same OrderedDict-as-LRU-ledger, same soft
     byte budget, same per-key lock so concurrent probe threads landing on
     the same not-yet-cached material download it once rather than once
-    each -- whole files here instead of fixed-size pages, since
+    each - whole files here instead of fixed-size pages, since
     that's the unit the standard backend's file constructors can consume.
 
     A freshly recorded (or freshly touched, via ``has()``) entry always
     ends up at the end of the LRU order, and eviction always pops from
-    the front -- so the file ``_find()`` resolved a path for can
+    the front - so the file ``_find()`` resolved a path for can
     never be the one an eviction happening on another thread picks next;
     only entries stale relative to it can be. That closes the same race
     :meth:`remote_source._PageCacheShard.put` avoids for in-memory pages: a
@@ -107,7 +107,7 @@ class _RemoteDiskCache:
         self._entry_locks: dict[str, threading.Lock] = {}
         self._meta_lock = threading.Lock()
         # Guards the install-and-record tail of _ensure_cached() below
-        # (the os.replace() + record() that actually mutates `root`'s
+        # (the os.replace() + record() that mutates `root`'s
         # contents and this cache's bookkeeping together) against
         # clear()'s rmtree/recreate running at the same moment. A
         # per-entry lock (see lock_for()) already serializes concurrent
@@ -117,21 +117,21 @@ class _RemoteDiskCache:
         self.lifecycle_lock = threading.RLock()
         # Counts downloads that currently have an open, not-yet-published
         # temp file on disk. clear() waits for this to hit zero before
-        # rmtree-ing `root` -- see begin_download()/end_download() and
+        # rmtree-ing `root` - see begin_download()/end_download() and
         # clear() below for why: unlike lifecycle_lock, which only needs
         # to cover the brief publish step, a download's temp file is
         # vulnerable for its entire (potentially slow) transfer, not
         # that tail. On POSIX, rmtree-ing a directory containing a
-        # file that's still open only unlinks its name -- the data stays
-        # readable/writable through the already-open descriptor -- but
+        # file that's still open only unlinks its name - the data stays
+        # readable/writable through the already-open descriptor - but
         # once that descriptor closes (as it does at the end of
         # _ensure_cached()'s ``with open(tmp_path, "wb") as f:`` block,
-        # before publish), an unlinked file's data is actually freed, so
+        # before publish), an unlinked file's data is freed, so
         # the publish step's os.replace(tmp_path, ...) would fail with
         # FileNotFoundError for a missing source path
         # anywhere on disk. Deferring clear() instead of racing it avoids
-        # that outright, and -- unlike holding lifecycle_lock for the
-        # whole transfer -- doesn't serialize unrelated concurrent
+        # that outright, and - unlike holding lifecycle_lock for the
+        # whole transfer - doesn't serialize unrelated concurrent
         # downloads against each other, only against clear() itself.
         self._active_downloads = 0
         self._no_active_downloads = threading.Condition(self.lifecycle_lock)
@@ -164,7 +164,7 @@ class _RemoteDiskCache:
         return os.path.join(self.root, rel_path)
 
     def has(self, rel_path: str) -> bool:
-        """True if `rel_path` is already cached on disk -- and, if so,
+        """True if `rel_path` is already cached on disk - and, if so,
         mark it most-recently-used so a same-moment eviction on another
         thread cannot acquire it (see class docstring)."""
         with self._lock:
@@ -232,16 +232,16 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
         self._download_chunk = remote_page_size
         self._size_cache: dict[str, Optional[int]] = {}
         self._size_lock = threading.Lock()
-        # Base Tablebase.__init__ calls self.add_directory(base_url) --
+        # Base Tablebase.__init__ calls self.add_directory(base_url),
         # overridden to a no-op below, since _find here resolves directly
         # against "<kind>/" and never falls back to a bare-root candidate
-        # the way local _find does -- the published remote layout always
+        # the way local _find does - the published remote layout always
         # has the kind subdirectories, per README.md's "Getting the
         # tablebase files".
         super().__init__(base_url, block_cache_bytes=block_cache_bytes)
 
     def add_directory(self, base_dir: str) -> None:
-        """No-op -- see the comment in __init__ above."""
+        """No-op - see the comment in __init__ above."""
 
     # --- table file resolution: fetch-and-cache-to-disk, then delegate ---
 
@@ -271,11 +271,11 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
             tmp_path = f"{local_path}.part"
             # begin_download()/end_download() make a concurrent
             # /admin/cache/clear() wait for this download rather than
-            # racing it -- see _RemoteDiskCache's docstring on
+            # racing it - see _RemoteDiskCache's docstring on
             # _active_downloads for why racing it (rather than
             # deferring) isn't safe to do here. This does not serialize
             # concurrent downloads of different tables against each
-            # other -- only clear() waits, not other downloads -- so
+            # other - only clear() waits, not other downloads - so
             # probe concurrency (see config.py's PROBE_THREADS) is
             # unaffected; the per-path lock_for(rel_path) above already
             # prevents two threads from downloading the same rel_path at
@@ -303,11 +303,11 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
                                 )
                             f.write(chunk)
                             offset += len(chunk)
-                    # Publication -- the only part that actually needs
+                    # Publication - the only part that needs
                     # `root` to still exist and mean what it did when this
-                    # method started -- is what lifecycle_lock protects.
+                    # method started - is what lifecycle_lock protects.
                     # Only reached once the loop above has written exactly
-                    # `size` bytes -- an atomic rename protects
+                    # `size` bytes - an atomic rename protects
                     # visibility, not content correctness, so a short
                     # download must never reach this line.
                     with self._disk_cache.lifecycle_lock:
@@ -338,7 +338,7 @@ class _RemoteCachingTablebase(chesstb.Tablebase):
 
     def clear_caches(self) -> None:
         """Drop the decoded-block cache and the on-disk downloaded-file
-        cache, without forgetting which tables are open -- re-opening
+        cache, without forgetting which tables are open - re-opening
         tables here would defeat the point of a cache-clear (a fresh
         Tablebase would re-download every table on first touch)."""
         self._block_cache.clear()

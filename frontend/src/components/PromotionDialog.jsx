@@ -1,3 +1,5 @@
+/** PromotionDialog.jsx: promotion piece chooser dialog */
+
 import { memo } from 'react';
 
 const PIECES = [['q', 'Queen'], ['r', 'Rook'], ['b', 'Bishop'], ['n', 'Knight']];

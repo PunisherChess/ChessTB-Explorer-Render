@@ -1,3 +1,5 @@
+/** Header.jsx: site header with logo, links, and settings button */
+
 import { memo } from 'react';
 import Icon from './ui/Icon.jsx';
 
