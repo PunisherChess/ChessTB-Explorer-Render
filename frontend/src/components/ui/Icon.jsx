@@ -17,6 +17,9 @@ const PATHS = {
     lockClosed: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
     gauge: <><path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M12 14 16 8" /><path d="M5 19a9 9 0 1 1 14 0" /></>,
     code: <><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>,
+    grid: <><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><path d="M12 3.5v17M3.5 12h17" /></>,
+    bars: <path d="M5 19v-8M12 19V5M19 19v-5" />,
+    list: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="0.5" /><circle cx="4.5" cy="12" r="0.5" /><circle cx="4.5" cy="18" r="0.5" /></>,
     settings: (
         <>
             <circle cx="12" cy="12" r="3" />

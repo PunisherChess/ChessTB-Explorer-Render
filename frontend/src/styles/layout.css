@@ -3,7 +3,7 @@
    125% (20px), following the window's vw/vh; the smaller term applies:
      width term :  13px + 0.1953vw   (16px @1536, 18px @2560, 20px @3584)
      height term:  12.55px + 0.442vh (16px @780, 18.3px @1300)
-   --board-size fills the window height up to --board-size-max. Scoped to
+   --board-size-fit fills the window height up to --board-size-max. Scoped to
    html.explorer (set in templates/index.html and frontend/index.html); the
    px-based admin page keeps the 16px baseline. At <=1180px both keep their
    base values. */
@@ -22,43 +22,48 @@
            Update when the height above the board changes. */
         --board-fit-h: calc((100vh - 15.75rem - 4px) / 1.25);
 
-        /* Width budget: padding 4rem + gaps 3rem + PGN column 12.5rem +
-           results table 40rem minimum = 59.5rem. */
-        --board-fit-w: calc(min(100vw, var(--content-max)) - 59.5rem);
+        /* Width shared by the board and results columns: padding 4rem +
+           gaps 3rem + PGN column 12.5rem = 19.5rem are taken off. */
+        --board-results-w: calc(min(100vw, var(--content-max)) - 19.5rem);
+
+        /* Results panel width that shows the four metric columns: the 50rem
+           container (tablebase.css) plus the 1px panel borders. */
+        --results-full-w: calc(50rem + 2px);
 
         /* Floor 20.5rem (328px at a 16px root, a multiple of 8px); the page
            scrolls below it. The floor must stay above the FEN toolbar's
            minimum content width (321px at a 16px root: four labelled
            buttons, Back, Next and five gaps), otherwise Next sticks out
            past the Lock button's right edge. Re-check it when a toolbar
-           button or its padding changes. --board-size-max caps the result,
-           and the results column takes the width the board column does not
-           use. */
-        --board-size: min(var(--board-size-max), max(20.5rem, min(var(--board-fit-h), var(--board-fit-w))));
+           button or its padding changes. */
+        --board-min: 20.5rem;
+
+        /* Width budget: the board leaves the results panel --results-full-w
+           whenever that keeps it at or above --board-min, and otherwise
+           leaves 40rem for the compact table. The clamp is 0 below
+           --board-min and the 10rem + 2px difference between the two
+           budgets from --board-min up; 0.5px absorbs rounding at equality. */
+        --board-fit-w-full: calc(var(--board-results-w) - var(--results-full-w));
+        --board-fit-w: calc(var(--board-results-w) - 40rem - clamp(0px, (var(--board-fit-w-full) - var(--board-min) + 0.5px) * 1000, 10rem + 2px));
+
+        /* --board-size-max caps the result, and the results column takes the
+           width the board column does not use. */
+        --board-size-fit: min(var(--board-size-max), max(var(--board-min), min(var(--board-fit-h), var(--board-fit-w))));
     }
     /* The results and PGN columns take the row height set by the board
        column and scroll their content internally. */
     .right-col, .pgn-col { contain: size; }
-
-    /* Rounds down to a multiple of 8px so each square is a whole number
-       of pixels. */
-    @supports (width: round(down, 100.7px, 8px)) {
-        :root {
-            --board-size: round(down, min(var(--board-size-max), max(20.5rem, min(var(--board-fit-h), var(--board-fit-w)))), 8px);
-        }
-    }
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────── */
 :root { --pgn-col-w: 12.5rem; }
 
 /* Above 1180px the PGN column takes up to 2.5rem of the width left after the
-   board and the 50rem the results table needs for untruncated text, so the
-   board size and the table text are unchanged. Reserved width: padding 4rem +
-   gaps 3rem + base column 12.5rem + table 50rem = 69.5rem. */
+   board and --results-full-w, so the board size and the four metric columns
+   are unchanged. */
 @media (min-width: 1181px) {
     :root {
-        --pgn-col-w: calc(12.5rem + clamp(0rem, min(100vw, var(--content-max)) - 69.5rem - var(--board-size), 2.5rem));
+        --pgn-col-w: calc(12.5rem + clamp(0rem, var(--board-results-w) - var(--results-full-w) - var(--board-size), 2.5rem));
     }
 }
 

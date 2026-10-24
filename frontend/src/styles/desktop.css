@@ -1,0 +1,73 @@
+/* ── Desktop visual style ───────────────────────────────────────────────
+   Above 1180px, controls are ghost buttons with a hairline border, panels
+   keep a bordered 6px container, and the three columns share the board
+   column's height. Shared rules are in surface.css. */
+@media (min-width: 1181px) {
+    :root {
+        --seg-pad: 0.125rem;
+        --seg-bg: var(--bg);
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    .site-header__title {
+        font-size: 0.9375rem;
+        letter-spacing: 0;
+    }
+    .site-header__sub {
+        font-size: 0.6875rem;
+        letter-spacing: 0.14em;
+        color: var(--text-muted);
+    }
+    .site-header__link--icon {
+        width: 2rem;
+        height: 2rem;
+        border-radius: var(--r-sm);
+    }
+    .site-header__link--icon:hover { background: var(--tonal-hi); }
+    .site-header__link--icon .icon {
+        width: 1.125rem;
+        height: 1.125rem;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .content { align-content: center; }
+    .left-col { gap: var(--space-1); }
+    .fen-block { gap: var(--space-2); }
+    .error-line {
+        min-height: 1.125rem;
+        padding-left: 0;
+    }
+
+    /* ── Controls ───────────────────────────────────────────────────── */
+    .fen-input {
+        border-color: var(--border);
+        background: var(--bg);
+    }
+    .btn:not(.btn--col-autoplay) {
+        border-color: var(--border);
+        background: transparent;
+        font-weight: 500;
+    }
+    .btn:hover:not(:disabled):not(.is-autoplay-disabled) {
+        border-color: var(--border-2);
+        background: var(--tonal);
+        color: var(--text);
+    }
+    .btn--compact { padding-inline: var(--space-3); }
+
+    /* ── Panels ─────────────────────────────────────────────────────── */
+    .panel { border-radius: var(--r-md); }
+    .panel-header {
+        min-height: 2.75rem;
+        padding: var(--space-2) var(--space-4);
+        background: transparent;
+    }
+    .metric-tabs {
+        min-height: 2.125rem;
+        margin: var(--space-3) var(--space-4) var(--space-2);
+    }
+
+    /* ── Tables and move list ───────────────────────────────────────── */
+    .moves-table { --col-divider: var(--hairline); }
+    .move-line__cell--white::before { background: var(--hairline); }
+}

@@ -36,13 +36,15 @@
         --screen-nav-h: calc(3rem + env(safe-area-inset-bottom, 0px));
         --viewport-h: 100vh;
 
-        /* Fixed heights above and around the board: three control rows,
-           column padding 1rem, gaps 1.875rem, error line 0.875rem plus
-           0.5rem slack, tray padding 1.25rem and tray borders 4px. The
-           remainder holds the board and its two trays: 1.25 x board.
-           Update when the height above the board changes. */
-        --board-fit-h: calc((var(--viewport-h) - var(--header-h) - var(--screen-nav-h) - 5.5rem - 3 * var(--control-h) - 4px) / 1.25);
-        --board-size: max(14rem, min(var(--board-size-cap), var(--board-fit-h)));
+        --control-h: 2.5rem;
+        --fen-icon-btn-w: 2.25rem;
+
+        /* The 14rem reserve covers the controls above the board, the turn
+           toggle, the trays and the column padding, with room for one
+           error line. The remainder holds the board and its two trays:
+           1.25 x board. Update when the height above the board changes. */
+        --board-fit-h: calc((var(--viewport-h) - var(--header-h) - var(--screen-nav-h) - 14rem) / 1.25);
+        --board-size-fit: max(14rem, min(var(--board-size-cap), var(--board-fit-h)));
     }
     @supports (height: 100dvh) {
         :root { --viewport-h: 100dvh; }
@@ -74,10 +76,15 @@
     }
     .left-col {
         overflow-y: auto;
+        justify-content: center;
         padding: var(--space-2) var(--space-4);
+        gap: var(--space-4);
     }
     .board-group { margin: 0 auto; }
-    .right-col, .pgn-col { padding: var(--space-4); overflow: hidden; }
+    .right-col, .pgn-col { padding: 0; overflow: hidden; }
+
+    .fen-block { gap: var(--space-2); }
+    .error-line:empty { display: none; }
 
     /* Logo and nav span two rows; the subtitle sits below the title. */
     .site-header {
@@ -119,9 +126,13 @@
 
 @media (max-width: 480px) {
     :root { --board-size-cap: min(360px, 88vw); }
-    .left-col, .right-col, .pgn-col {
+    .left-col {
         padding-left:  max(var(--space-4), env(safe-area-inset-left));
         padding-right: max(var(--space-4), env(safe-area-inset-right));
+    }
+    .right-col, .pgn-col {
+        padding-left:  env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
     }
     .site-header {
         padding-left:  max(var(--space-5), env(safe-area-inset-left));
@@ -149,4 +160,18 @@
     /* #board handles its own drag gestures; letting the browser also
        interpret them as page-scroll/pinch-zoom fights the drag. */
     .spare-piece, .promotion-piece-btn { touch-action: none; }
+}
+
+/* An invisible ::after extends each phone control's tap area vertically to
+   --touch-target. A turn button sits inside its toggle's padding and 1px
+   border. */
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+    .btn:not(.btn--col-autoplay), .turn-btn { position: relative; }
+    .btn:not(.btn--col-autoplay)::after, .turn-btn::after {
+        content: '';
+        position: absolute;
+        inset: calc((var(--control-h) - var(--touch-target)) / 2) 0;
+    }
+    .turn-btn::after { inset-block: calc((var(--control-h) - var(--touch-target)) / 2 - var(--seg-pad) - 1px); }
+    .btn--col-autoplay::after { inset: -0.5rem; }
 }

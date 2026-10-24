@@ -108,11 +108,11 @@
 #root-row td { height: var(--thead-root-h); }
 
 /* ── Column widths (sum to 100%) ────────────────────────────────────── */
-.moves-table col.col-rank                { width: 3%; }
+.moves-table col.col-rank                { width: 3.125%; }
 .moves-table col.col-move                { width: 7%; }
 .moves-table col.group-dtc.col-move      { width: 8%; }
 .moves-table col.group-dtz.col-score     { width: 15%; }
-.moves-table col.group-dtc.col-score     { width: 17%; }
+.moves-table col.group-dtc.col-score     { width: 16.875%; }
 .moves-table col.group-dtm.col-score     { width: 18%; }
 .moves-table col.group-dtm50.col-score   { width: 18%; }
 
@@ -141,7 +141,7 @@
 .moves-table th.group-dtz:not(.col-score),
 .moves-table th.group-dtc:not(.col-score),
 .moves-table th.group-dtm:not(.col-score),
-.moves-table th.group-dtm50:not(.col-score) { box-shadow: inset 1px 0 0 var(--border-2); }
+.moves-table th.group-dtm50:not(.col-score) { box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)); }
 
 /* ── Column header row (Move / Score labels) ────────────────────────── */
 .moves-table thead tr.col-row th {
@@ -152,7 +152,7 @@
     color: var(--text-muted);
     text-align: left;
     padding: 0.1875rem var(--space-2) 0.4375rem;
-    box-shadow: inset 0 -1px 0 var(--border-2);
+    box-shadow: inset 0 -1px 0 var(--row-line, var(--border-2));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -161,7 +161,7 @@
 .moves-table thead tr.col-row th.group-dtc:not(.col-score),
 .moves-table thead tr.col-row th.group-dtm:not(.col-score),
 .moves-table thead tr.col-row th.group-dtm50:not(.col-score) {
-    box-shadow: inset 1px 0 0 var(--border-2), inset 0 -1px 0 var(--border-2);
+    box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)), inset 0 -1px 0 var(--row-line, var(--border-2));
 }
 /* Override group-boundary padding for col-row: add left spacing after
    border - :not(.col-score) for the same reason as the border rules
@@ -181,7 +181,7 @@
    the existing column-header row, instead of a dedicated row ─────────── */
 .btn--col-autoplay {
     position: relative;
-    height: 1rem;
+    height: var(--autoplay-btn-h);
     min-width: 1.25rem;
     padding: 0 0.3125rem;
     border-radius: 0.1875rem;
@@ -219,7 +219,7 @@
     padding: 0.375rem var(--space-2);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--row-line, var(--border));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -242,10 +242,10 @@
 }
 
 /* Group boundary edges on td, drawn the same way as the header cells. */
-.moves-table td.group-dtz:not(.col-score)  { box-shadow: inset 1px 0 0 var(--border-2); padding-left: var(--space-2); }
-.moves-table td.group-dtc:not(.col-score)  { box-shadow: inset 1px 0 0 var(--border-2); padding-left: var(--space-2); }
-.moves-table td.group-dtm:not(.col-score)  { box-shadow: inset 1px 0 0 var(--border-2); padding-left: var(--space-2); }
-.moves-table td.group-dtm50:not(.col-score){ box-shadow: inset 1px 0 0 var(--border-2); padding-left: var(--space-2); }
+.moves-table td.group-dtz:not(.col-score)  { box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)); padding-left: var(--space-2); }
+.moves-table td.group-dtc:not(.col-score)  { box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)); padding-left: var(--space-2); }
+.moves-table td.group-dtm:not(.col-score)  { box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)); padding-left: var(--space-2); }
+.moves-table td.group-dtm50:not(.col-score){ box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)); padding-left: var(--space-2); }
 
 .moves-table td.col-score {
     text-align: right;
@@ -284,16 +284,16 @@
 #root-row td {
     background: var(--surface-3);
     border: 0;
-    box-shadow: inset 0 -1px 0 var(--border-2);
+    box-shadow: inset 0 -1px 0 var(--row-line, var(--border-2));
 }
 #root-row td.group-dtz:not(.col-score),
 #root-row td.group-dtc:not(.col-score),
 #root-row td.group-dtm:not(.col-score),
 #root-row td.group-dtm50:not(.col-score) {
-    box-shadow: inset 1px 0 0 var(--border-2), inset 0 -1px 0 var(--border-2);
+    box-shadow: inset 1px 0 0 var(--col-divider, var(--border-2)), inset 0 -1px 0 var(--row-line, var(--border-2));
 }
 #root-row td:first-child {
-    box-shadow: inset 3px 0 0 var(--gold-dim), inset 0 -1px 0 var(--border-2);
+    box-shadow: inset 3px 0 0 var(--gold-dim), inset 0 -1px 0 var(--row-line, var(--border-2));
 }
 #root-row.is-hidden { display: none; }
 
@@ -375,9 +375,9 @@
 .is-loading .moves-table td.col-move { animation: shimmer 1.1s ease-in-out infinite; }
 
 /* ── Compact view ───────────────────────────────────────────────────────
-   Below 38rem the nine-column table is replaced by a three-column one
+   Below 50rem the nine-column table is replaced by a three-column one
    (rank, move, score) for the metric chosen in .metric-tabs. */
-@container results (width < 38rem) {
+@container results (width < 50rem) {
     .metric-tabs {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -425,4 +425,16 @@
     .moves-table[data-active-metric="dtm50"] col.group-dtm50 { display: table-column; }
     .moves-table[data-active-metric] col.col-move  { width: 26%; }
     .moves-table[data-active-metric] col.col-score { width: 60%; }
+
+    /* The group row only repeats the active tab label, so it takes no
+       height and its auto-play button sits in the column header row. */
+    .moves-head { position: relative; }
+    .moves-table thead tr.group-row th { height: 0; padding: 0; line-height: 0; }
+    .group-label { display: none; }
+    .group-row-inner {
+        position: absolute;
+        top: calc((var(--thead-row-h) - var(--autoplay-btn-h)) / 2 - 0.125rem);
+        left: 56%;
+        transform: translateX(-50%);
+    }
 }

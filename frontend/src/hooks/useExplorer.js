@@ -14,9 +14,14 @@ import { buildPgnText, parsePgn } from '../engine/pgnFormat.js';
 
 const DEFAULT_FEN = '4k3/8/8/8/8/8/8/4K2R w - - 0 1';
 
-// The startup and cleared positions are shown as an empty box so that a
-// pasted FEN replaces them directly.
-function fenInputText(fen) { return fen === DEFAULT_FEN || fen === CLEARED_FEN ? '' : fen; }
+// The startup and cleared positions are shown as an empty box, for either side
+// to move, so that a pasted FEN replaces them directly.
+function fenInputText(fen) {
+    const parts = fen.split(' ');
+    parts[1] = 'w';
+    const key = parts.join(' ');
+    return key === DEFAULT_FEN || key === CLEARED_FEN ? '' : fen;
+}
 
 const AUTO_PLAY_METRICS = Object.keys(METRICS);
 
