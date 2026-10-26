@@ -91,6 +91,8 @@ function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autop
         Tablebase.notifyTableRendered();
     }, [tb.rows, tb.rootRow]);
 
+    const rankDigits = Math.max(2, String(tb.rows.reduce((max, row) => Math.max(max, row.rank), 0)).length);
+
     return (
         <Panel
             className={`results-panel${tb.pending ? ' is-pending' : ''}${tb.loading ? ' is-loading' : ''}`}
@@ -115,7 +117,7 @@ function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autop
                 options={METRIC_OPTIONS} value={activeMetric} onChange={setActiveMetric}
             />
 
-            <div className="moves-view">
+            <div className="moves-view" style={{ '--rank-digits': rankDigits }}>
                 <div className="moves-head">
                     <table className="moves-table moves-table--head" data-active-metric={activeMetric}>
                         <MetricColGroup />

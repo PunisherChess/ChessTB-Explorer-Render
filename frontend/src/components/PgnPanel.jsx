@@ -19,7 +19,7 @@ function renderItems(items, nodes, rootChildren, currentId, onGoTo, keyPrefix) {
             const whiteEmpty = !item.white || item.white.placeholder;
             return [
                 <div className="move-line__row" key={key}>
-                    <span className="move-line__num">{item.num}.</span>
+                    <span className="move-line__num">{item.num}</span>
                     <span
                         className={`move-line__cell move-line__cell--white${whiteEmpty ? ' move-line__cell--empty' : ''}${item.white?.placeholder ? ' move-line__cell--placeholder' : ''}${item.white?.isCurrent ? ' is-current' : ''}`}
                         onClick={item.white && !item.white.placeholder ? () => onGoTo(item.white.node.id) : undefined}

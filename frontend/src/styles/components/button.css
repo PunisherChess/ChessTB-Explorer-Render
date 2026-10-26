@@ -28,10 +28,18 @@
 
 .btn__icon { width: 0.75rem; height: 0.75rem; opacity: 0.75; }
 
-/* Apply button - gold accent */
-.btn--apply { border-color: var(--gold-dim); color: var(--gold); }
-.btn--apply:hover { background: var(--gold-glow); border-color: var(--gold); }
-.btn--apply .btn__icon { opacity: 1; }
+/* FEN block buttons - same border as the FEN box, except while locked */
+.fen-block .btn:not(.is-locked):not(.btn--col-autoplay),
+.fen-block .btn:not(.is-locked):hover:not(:disabled):not(.is-autoplay-disabled) {
+    border-color: var(--control-border);
+}
+
+/* FEN block buttons except Lock (its gold marks the locked state) - gold text and border while pressed */
+.fen-block .btn:not(.btn--lock):active:not(:disabled):not(.is-autoplay-disabled),
+.fen-block .btn:not(.btn--lock).is-pressed:not(:disabled):not(.is-autoplay-disabled) {
+    border-color: var(--gold);
+    color: var(--gold);
+}
 
 /* Grow buttons fill available space equally */
 .btn--grow        { flex: 1 0 0; justify-content: center; padding: 0 0.375rem; }

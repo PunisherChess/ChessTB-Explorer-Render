@@ -10,13 +10,13 @@
    single colour (a custom starting FEN, the last move being White's
    with no reply yet, or a move that had a variation - see
    .move-line__variation below) leaves the other cell of that row empty.
-   The rank column is --pgn-rank-w, close to 1.5x the results table's
-   rank column; the remaining space is split evenly between the White
-   and Black columns. */
+   The rank column is as wide as its widest number, with the results
+   table's rank column width as the minimum (two digits plus --rank-pad);
+   the remaining space is split evenly between the White and Black
+   columns. */
 .move-line {
-    --pgn-rank-width: var(--pgn-rank-w);
     display: grid;
-    grid-template-columns: var(--pgn-rank-width) 1fr 1fr;
+    grid-template-columns: auto 1fr 1fr;
     align-items: center;
     font-size: var(--text-xs);
     padding: 0;
@@ -46,6 +46,10 @@
     text-align: center;
     padding: var(--space-1) 0;
     user-select: none;
+}
+.move-line__row > .move-line__num {
+    min-width: calc(2ch + var(--rank-pad));
+    padding-inline: calc(var(--rank-pad) / 2);
 }
 .move-line__cell {
     position: relative;
@@ -90,7 +94,6 @@
 }
 .move-line__cell:not(.move-line__cell--empty).is-current .move-line__move {
     color: var(--text);
-    font-weight: 600;
 }
 /* The PGN ellipsis placeholder in a row that opens on Black (see
    buildMainLine() in moveLine.js) - muted like the rank label, since it's a
@@ -149,7 +152,6 @@
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--text);
-    font-weight: 600;
 }
 
 /* ── PGN panel ──────────────────────────────────────────────────────── */

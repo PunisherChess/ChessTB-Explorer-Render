@@ -1266,7 +1266,7 @@ def evaluate_all_moves(
                 eff_dtc = _effective_distance(my_dtc_wdl, my_dtc)
             # A draw has nothing owed regardless of the raw push count
             # above - e.g. a defensive push into a dead draw (stalemate,
-            # insufficient material, or a budget that no longer fits the
+            # insufficient material, or a budget that exceeds the
             # clock) must not report a nonzero push count solely because it
             # happened to be a push; _order_rank sorts it correctly either
             # way (it treats wdl_val == 0 as rank 0 regardless), but the

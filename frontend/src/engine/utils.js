@@ -7,7 +7,7 @@
  * The returned function also exposes cancel(), so a caller that's about to
  * issue an equivalent call immediately (bypassing the debounce) can drop any
  * pending trailing call instead of leaving it to fire later against a
- * position that's no longer current.
+ * position that is stale.
  * @param {Function} fn
  * @param {number} delay
  */

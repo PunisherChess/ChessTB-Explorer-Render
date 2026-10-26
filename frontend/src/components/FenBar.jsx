@@ -1,6 +1,6 @@
 /** FenBar.jsx: FEN input and board action buttons */
 
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import Button from './ui/Button.jsx';
 import Icon from './ui/Icon.jsx';
 
@@ -8,13 +8,18 @@ import Icon from './ui/Icon.jsx';
 function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, canBack, canForward, fenError, tbError }) {
     const errorMessage = fenError ?? tbError?.message ?? '';
     const isCoverageError = !fenError && !!tbError?.isCoverage;
+    const [applyPressed, setApplyPressed] = useState(false);
 
     function submitFen() {
         const v = fenInputRef.current?.value.trim();
         if (v) actions.applyFen(v);
     }
+    // Enter in the FEN box highlights Apply for as long as the key is held.
     function onFenKeyDown(e) {
-        if (e.key === 'Enter') { e.preventDefault(); submitFen(); }
+        if (e.key === 'Enter') { e.preventDefault(); setApplyPressed(true); submitFen(); }
+    }
+    function onFenKeyUp(e) {
+        if (e.key === 'Enter') setApplyPressed(false);
     }
     function onLockClick() {
         if (lockAutoplayDisabled) return;
@@ -32,7 +37,7 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
                         placeholder="Enter FEN here" disabled={!ready}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false"
                         aria-label="FEN position string"
-                        onKeyDown={onFenKeyDown}
+                        onKeyDown={onFenKeyDown} onKeyUp={onFenKeyUp} onBlur={() => setApplyPressed(false)}
                     />
                     <button id="lock-btn" type="button"
                             className={`btn btn--icon-only btn--lock${locked ? ' is-locked' : ''}${lockAutoplayDisabled ? ' is-autoplay-disabled' : ''}`}
@@ -46,7 +51,7 @@ function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, can
                 </div>
 
                 <div className="fen-actions" role="toolbar" aria-label="Board actions">
-                    <Button id="apply-btn" variant="primary" grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={submitFen}>Apply</Button>
+                    <Button id="apply-btn" className={applyPressed ? 'is-pressed' : ''} grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={submitFen}>Apply</Button>
                     <Button id="flip-btn" grow icon="flip" title="Flip board (F)" onClick={actions.flip}>Flip</Button>
                     <Button id="clear-btn" grow icon="trash" title="Clear board (C)" onClick={actions.clearBoard}>Clear</Button>
                     <Button id="copy-btn" grow icon="copy" title="Copy FEN to clipboard" aria-label="Copy FEN to clipboard" onClick={actions.copyFen}>Copy</Button>

@@ -8,6 +8,12 @@
     /* Borders */
     --border:       #2c2a27;
     --border-2:     #3d3a36;
+    --control-border: var(--border);
+
+    /* Hairline rule and tonal control fills */
+    --hairline:     rgba(255, 255, 255, 0.07);
+    --tonal:        rgba(255, 255, 255, 0.06);
+    --tonal-hi:     rgba(255, 255, 255, 0.10);
 
     /* Text */
     --text:         #e8e4de;
@@ -47,7 +53,7 @@
 
     /* Turn indicators */
     --pip-black-bg:     #1a1816;
-    --pip-black-border: #555;
+    --pip-black-border: #8c8780;
     --turn-active-bg:   #242220;
 
     /* Type scale */
@@ -71,8 +77,10 @@
     /* Tables */
     --thead-row-h:         1.75rem;
     --thead-root-h:        1.9375rem;
-    --pgn-rank-w:          2.0625rem;
-    --pgn-rank-w-compact:  3.125rem;
+    --autoplay-btn-h:      1rem;
+    /* Rank column of the results table and the PGN panel: at least two mono
+       digits plus --rank-pad of horizontal padding. */
+    --rank-pad:            0.8125rem;
 
     /* Controls */
     --control-h:    2rem;
@@ -103,14 +111,21 @@
 
     /* Board width and height, read by .board-wrap, #board, cg-container,
        cg-board and .spare-tray; .spare-piece derives its size from it.
-       Sized against the tighter of viewport width and height and never
-       above --board-size-max, which also bounds the left column.
-       --board-size-cap is the width-based limit; --board-size is overridden
-       above 1180px (layout.css) and below 768px (responsive.css). */
+       --board-size is --board-size-fit rounded down to a multiple of 8px, so
+       each square is a whole number of pixels. --board-size-fit is sized
+       against the tighter of viewport width and height and never above
+       --board-size-max, which also bounds the left column.
+       --board-size-cap is the width-based limit; --board-size-fit is
+       overridden above 1180px (layout.css) and below 768px (responsive.css). */
     --board-size-max: 720px;
     --board-size-cap: min(var(--board-size-max), clamp(18.75rem, min(23.4375vw, 41.6667vh), 31.5rem));
-    --board-size: var(--board-size-cap);
+    --board-size-fit: var(--board-size-cap);
+    --board-size: var(--board-size-fit);
     --spare-size:  calc(var(--board-size) / 8);
+}
+
+@supports (width: round(down, 100.7px, 8px)) {
+    :root { --board-size: round(down, var(--board-size-fit), 8px); }
 }
 
 @media (hover: none) and (pointer: coarse) {
