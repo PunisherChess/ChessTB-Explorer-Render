@@ -2,10 +2,9 @@
 
 import Icon from './Icon.jsx';
 
-export default function Button({ variant, compact, grow, iconOnly, icon, className = '', children, ...rest }) {
+export default function Button({ compact, grow, iconOnly, icon, className = '', children, ...rest }) {
     const cls = [
         'btn',
-        variant === 'primary' && 'btn--apply',
         compact && 'btn--compact',
         grow && 'btn--grow',
         iconOnly && 'btn--icon-only',

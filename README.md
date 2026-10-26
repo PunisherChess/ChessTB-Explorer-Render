@@ -202,13 +202,18 @@ Stylesheets are in `frontend/src/styles/` and are bundled by Vite into
 `tokens.css` defines the colour, type, spacing, radius, elevation, motion,
 and control-size custom properties; other files reference them instead of
 literal values. Files are imported into the `reset`, `vendor`, and `app`
-cascade layers by `index.css` and `admin.css`.
+cascade layers by `index.css` and `admin.css`. `surface.css` holds the visual
+style shared by phone and desktop, `phone.css` the phone style (below 768 px),
+and `desktop.css` the desktop style (above 1180 px). Phone layout and sizing
+are in `responsive.css`. The 768 to 1180 px range keeps the base styles.
 
 | Token group | Custom properties |
 |---|---|
 | Type scale | `--text-xs` 12 px, `--text-sm` 13 px, `--text-md` 14 px, `--text-lg` 16 px, `--text-xl` 20 px |
 | Spacing | `--space-1` to `--space-6` (4 px to 32 px) |
-| Controls | `--control-h`, `--control-h-sm` (44 px on touch-primary devices) |
+| Controls | `--control-h`, `--control-h-sm` (44 px on touch-primary devices; `--control-h` is 40 px below 768 px, where touch buttons keep a 44 px tap area) |
+| Surfaces and accent | `--control-border` (FEN box, FEN block button, and turn toggle outlines), `--hairline`, `--tonal`, `--tonal-hi` (rules and control fills) |
+| Rank column | `--rank-pad` (padding of the results and PGN rank columns; `--rank-digits`, set on the results table's container, is the digit count) |
 | Board | `--board-light`, `--board-dark`, `--board-highlight`, read by `engine/theme.js` |
 
 Sizes are authored in `rem`, so the large-screen root font size scaling
@@ -218,22 +223,29 @@ applies to all text and controls.
 
 | Viewport | Layout |
 |---|---|
-| Above 1180 px | Three-column CSS grid (board, results, PGN). The results and PGN columns take the board column's height and scroll internally. |
+| Above 1180 px | Three-column CSS grid (board, results, PGN). The results and PGN columns take the board column's height, scroll internally, and the grid is vertically centred. |
 | 768 to 1180 px | Board row above a results and PGN row; the page scrolls. |
-| Below 768 px | Three horizontally swipeable screens (board, results, PGN) with a bottom navigation bar (`ScreenNav`). Header and navigation heights include the device safe-area insets, and screen heights use `dvh`. The header shows the subtitle below the title, and the board is sized to the visible height so the whole board screen fits. |
+| Below 768 px | Three horizontally swipeable screens (board, results, PGN) with a bottom navigation bar (`ScreenNav`). Header and navigation heights include the device safe-area insets, and screen heights use `dvh`. The header shows the subtitle below the title, and the board is sized to the visible height so the whole board screen fits. The error line takes space only while it has text. The board column is vertically centred, the results and PGN panels run edge to edge, and the navigation items have icons. |
 
 The side-to-move toggle and the board form one group (`.board-group`) as wide
-as the board, with a fixed small gap between them at every screen size. Free
-vertical space in the board column sits above the group.
+as the board, with a fixed small gap between them at every screen size. In the
+768 to 1180 px range, free vertical space in the board column sits above the
+group; below 768 px the column is vertically centred.
 
-The results panel is a `results` size container. At 38 rem wide and above it
+The results panel is a `results` size container. At 50 rem wide and above it
 shows the four metric columns; below that it shows one metric at a time,
-selected with the metric tabs, regardless of viewport width. The results
-table is a fixed header table above a scrolling body table, so the scrollbar
-starts at the first moves row. The body reserves no scrollbar gutter: while
-its rows overflow, its table is widened by the scrollbar's measured width, so
-columns keep the header's position and width whether or not a scrollbar shows.
-The PGN move-number column width is set by `--pgn-rank-w` in `tokens.css`.
+selected with the metric tabs, regardless of viewport width. In that view the
+group header row has no height and the active metric's auto-play button sits
+in the column header row. The results table is a fixed header table above a
+scrolling body table, so the scrollbar starts at the first moves row. The body
+reserves no scrollbar gutter: while its rows overflow, its table is widened by
+the scrollbar's measured width, so columns keep the header's position and
+width whether or not a scrollbar shows.
+In the four-metric view the Move columns have a fixed width, the DTZ and DTC
+score columns fit their longest text, and the DTM and DTM50 score columns share
+the remaining width. The rank column of the results table and of the PGN panel
+is as wide as its largest rank or move number, with a minimum of two digits, so
+the two columns have the same width and the numbers sit at the same position.
 
 ### Display scaling
 
@@ -243,30 +255,36 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
   (`html.explorer`) is 100% of the browser default up to a 1536 x 780 window
   and rises to at most 125% (20 px), following the window's width and
   height. Browser zoom and the browser default font size apply.
-- **Board:** above 1180 px, `--board-size` fills the window height in
-  multiples of 8 px, from 20.5 rem up to `--board-size-max` (720 px, defined
-  in `tokens.css`), and leaves at least 40 rem for the results table. The
-  left column is as wide as the board, so it is capped at 720 px as well.
-  The width the board column does not use goes to the results column, so
-  the total content width stays constant.
+- **Board:** `--board-size` is `--board-size-fit` rounded down to a multiple
+  of 8 px at every screen size, so each square is a whole number of pixels.
+  Browsers without CSS `round()` use the unrounded value. Above 1180 px,
+  `--board-size-fit` fills the window height from 20.5 rem up to
+  `--board-size-max` (720 px, defined in `tokens.css`). It leaves the results
+  panel 50 rem plus its 2 px borders, so the four metric columns show,
+  whenever the board stays at or above 20.5 rem, which holds from a window
+  width of 90 rem + 2 px (1442 px at a 16 px root). Below that width it
+  leaves 40 rem for the compact table. The left column is as wide as the
+  board, so it is capped at 720 px as well. The width the board column does
+  not use goes to the results column, so the total content width stays
+  constant.
 - **PGN column:** above 1180 px, the column is 12.5 rem wide plus up to
-  2.5 rem taken from the width left over after the board and the 50 rem
-  the results table needs for untruncated text, so the board size and the
+  2.5 rem taken from the width left over after the board and the results
+  panel width that shows the four metric columns, so the board size and the
   table text are unchanged. The Import and Export buttons show their labels
   once the PGN panel header content is at least 12.25 rem wide.
 - **Tablet layout:** at 1180 px and below, the root font size is the
-  browser default and `--board-size` is `--board-size-cap`, defined in
+  browser default and `--board-size-fit` is `--board-size-cap`, defined in
   `tokens.css` as
   `min(720px, clamp(18.75rem, min(23.4375vw, 41.6667vh), 31.5rem))`.
-- **Phone layout:** below 768 px, `--board-size` is the smaller of
+- **Phone layout:** below 768 px, `--board-size-fit` is the smaller of
   `--board-size-cap` (`min(360px, 88vw)` up to 480 px wide) and the height
-  that remains after the header, bottom navigation, and the controls
-  above the board, with a floor of 14 rem. The board screen therefore
-  fits the visible height regardless of browser toolbar size. Below the
-  floor, the screen scrolls from its top.
+  that remains after the header, bottom navigation, and a 14 rem reserve
+  for the controls above the board, with a floor of 14 rem. The board
+  screen therefore fits the visible height regardless of browser toolbar
+  size. Below the floor, the screen scrolls from its top.
 - `--board-fit-h` includes the fixed height above the board in the left
   column and requires an update when that height changes. This applies to
-  both the desktop definition in `layout.css` and the phone definition in
+  both the desktop definition in `layout.css` and the phone reserve in
   `responsive.css`.
 - `html.explorer` is set in `templates/index.html` and `frontend/index.html`.
   `/admin` does not use it.
@@ -700,8 +718,8 @@ means no persistent disk is needed regardless of plan - see
   play it, or lock the board and drag a piece through a legal move.
 - **Navigate history**: the Undo/Redo arrow buttons or `←`/`→`, or click
   any move in the PGN panel to jump straight to that point in the line.
-- **Auto-play**: click the ▶ button above the DTZ, DTC, DTM, or DTM50
-  columns
+- **Auto-play**: click the ▶ button in the results table header of the DTZ,
+  DTC, DTM, or DTM50 metric
   to have the app play that metric's best move on a timer (delay set by
   **Autoplay Delay** in settings, 1.25s by default); click again (the
   button shows ■ while running) to stop. Any manual navigation stops auto-play.

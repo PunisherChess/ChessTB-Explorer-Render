@@ -1,0 +1,95 @@
+/* ── Surface style ──────────────────────────────────────────────────────
+   Shared by phone (below 768px) and desktop (above 1180px): hairline
+   structure, 4px controls, 6px containers, segmented controls, and gold for
+   active states. Tablet widths keep the base styles. Device specifics are in
+   phone.css and desktop.css. */
+@media (max-width: 767px), (min-width: 1181px) {
+    :root { --autoplay-btn-h: 1.125rem; }
+
+    .site-header { border-bottom-color: var(--hairline); }
+
+    /* ── Controls ───────────────────────────────────────────────────── */
+    .fen-input { border-radius: var(--r-sm); }
+    .btn:not(.btn--col-autoplay) {
+        border-radius: var(--r-sm);
+        color: var(--text);
+        font-size: var(--text-sm);
+    }
+    .btn.btn--lock.is-locked,
+    .btn.btn--lock.is-locked:hover:not(.is-autoplay-disabled) {
+        border-color: var(--gold);
+        background: var(--gold-glow);
+        color: var(--gold);
+    }
+    .btn--col-autoplay {
+        min-width: 1.5rem;
+        padding: 0 0.375rem;
+        border-color: transparent;
+        border-radius: var(--r-sm);
+        background: var(--tonal-hi);
+        color: var(--text);
+    }
+
+    /* ── Segmented controls ─────────────────────────────────────────── */
+    .turn-row {
+        padding: var(--seg-pad);
+        gap: var(--seg-pad);
+        border: 1px solid var(--control-border);
+        border-radius: var(--r-md);
+        background: var(--seg-bg);
+    }
+    .turn-btn {
+        height: calc(var(--control-h) - 2 * var(--seg-pad) - 2px);
+        border-color: transparent;
+        border-radius: var(--r-sm);
+        background: transparent;
+        font-size: var(--text-sm);
+        letter-spacing: 0;
+    }
+    .turn-btn:hover {
+        border-color: transparent;
+        background: var(--tonal);
+        color: var(--text);
+    }
+    .turn-btn.is-active {
+        border-color: var(--gold-dim);
+        background: var(--surface-3);
+        color: var(--gold);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    .metric-tabs {
+        padding: var(--seg-pad);
+        gap: var(--seg-pad);
+        border-radius: var(--r-md);
+        background: var(--seg-bg);
+        box-shadow: inset 0 0 0 1px var(--hairline);
+    }
+    .metric-tab {
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        box-shadow: none;
+        color: var(--text-dim);
+        font-size: var(--text-sm);
+        letter-spacing: 0;
+    }
+    .metric-tab + .metric-tab { border-left: 0; }
+    .metric-tab.is-active {
+        background: var(--surface-3);
+        color: var(--gold);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--gold-dim);
+    }
+
+    /* ── Panels, tables and move list ───────────────────────────────── */
+    .panel-header__title {
+        font-size: var(--text-lg);
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--text);
+    }
+    .moves-table { --row-line: var(--hairline); }
+    .moves-table thead th { background: transparent; }
+    .move-line__row, .move-line__variation { border-bottom-color: var(--hairline); }
+}

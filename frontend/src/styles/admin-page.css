@@ -87,8 +87,7 @@ body.admin-page {
 
 /* Destructive-action modifier for the shared `.btn` component (the
    Refresh button next to it needs no modifier - plain `.btn` already
-   matches). Follows the same pattern as `.btn--apply`'s gold accent,
-   using the `--loss-glow` token for the hover fill. */
+   matches). Uses the `--loss-glow` token for the hover fill. */
 .admin-page .btn.danger { border-color: var(--loss); color: var(--loss); }
 .admin-page .btn.danger:hover { background: var(--loss-glow); border-color: var(--loss); }
 
