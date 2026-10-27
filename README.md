@@ -204,15 +204,19 @@ and control-size custom properties; other files reference them instead of
 literal values. Files are imported into the `reset`, `vendor`, and `app`
 cascade layers by `index.css` and `admin.css`. `surface.css` holds the visual
 style shared by phone and desktop, `phone.css` the phone style (below 768 px),
-and `desktop.css` the desktop style (above 1180 px). Phone layout and sizing
-are in `responsive.css`. The 768 to 1180 px range keeps the base styles.
+and `desktop.css` the desktop style (above 1180 px). `tablet.css` applies the
+phone style to the results panel and the shared control shape and type to the
+FEN block and the PGN header buttons from 768 to 1180 px; the rest of that
+range keeps the base styles.
+Phone and tablet layout and sizing are in `responsive.css`. The results and
+PGN panels use the page background at every viewport width.
 
 | Token group | Custom properties |
 |---|---|
 | Type scale | `--text-xs` 12 px, `--text-sm` 13 px, `--text-md` 14 px, `--text-lg` 16 px, `--text-xl` 20 px |
 | Spacing | `--space-1` to `--space-6` (4 px to 32 px) |
 | Controls | `--control-h`, `--control-h-sm` (44 px on touch-primary devices; `--control-h` is 40 px below 768 px, where touch buttons keep a 44 px tap area) |
-| Surfaces and accent | `--control-border` (FEN box, FEN block button, and turn toggle outlines), `--hairline`, `--tonal`, `--tonal-hi` (rules and control fills) |
+| Surfaces and accent | `--control-border` (FEN box, FEN block button, panel header button, and turn toggle outlines), `--hairline`, `--tonal`, `--tonal-hi` (rules and control fills) |
 | Rank column | `--rank-pad` (padding of the results and PGN rank columns; `--rank-digits`, set on the results table's container, is the digit count) |
 | Board | `--board-light`, `--board-dark`, `--board-highlight`, read by `engine/theme.js` |
 
@@ -224,7 +228,7 @@ applies to all text and controls.
 | Viewport | Layout |
 |---|---|
 | Above 1180 px | Three-column CSS grid (board, results, PGN). The results and PGN columns take the board column's height, scroll internally, and the grid is vertically centred. |
-| 768 to 1180 px | Board row above a results and PGN row; the page scrolls. |
+| 768 to 1180 px | Two-row grid: the board column and the PGN panel in the first row, the results panel across the full width in the second row; the page scrolls. |
 | Below 768 px | Three horizontally swipeable screens (board, results, PGN) with a bottom navigation bar (`ScreenNav`). Header and navigation heights include the device safe-area insets, and screen heights use `dvh`. The header shows the subtitle below the title, and the board is sized to the visible height so the whole board screen fits. The error line takes space only while it has text. The board column is vertically centred, the results and PGN panels run edge to edge, and the navigation items have icons. |
 
 The side-to-move toggle and the board form one group (`.board-group`) as wide

@@ -1,7 +1,8 @@
 /* ── Phone visual style ─────────────────────────────────────────────────
-   Below 768px, controls use tonal fills (the FEN block buttons keep a thin
-   border) and the results and PGN panels run edge to edge. Shared rules are
-   in surface.css; layout and sizing are in responsive.css. */
+   Below 768px, controls use tonal fills (the FEN block and panel header
+   buttons keep a thin border) and the results and PGN panels run edge to
+   edge. Shared rules are in surface.css; layout and sizing are in
+   responsive.css. */
 @media (max-width: 767px) {
     :root {
         --seg-pad: 0.1875rem;
@@ -10,6 +11,9 @@
     }
 
     /* ── Controls ───────────────────────────────────────────────────── */
+    /* The FEN block and panel headers keep the solid border used at every width. */
+    .fen-block,
+    .panel-header { --control-border: var(--border); }
     .btn:not(.btn--col-autoplay) {
         border-color: transparent;
         background: var(--tonal);
@@ -28,12 +32,10 @@
     .panel {
         border: 0;
         border-radius: 0;
-        background: transparent;
     }
     .panel-header {
         padding: var(--space-3) var(--space-3) var(--space-2);
         border-bottom: 0;
-        background: transparent;
     }
     .metric-tabs {
         min-height: 2.5rem;

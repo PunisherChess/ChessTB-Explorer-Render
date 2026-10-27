@@ -1,7 +1,7 @@
 /* ── Responsive layout ─────────────────────────────────────────────────
-   At 1180px and below the columns wrap: the board column takes a
-   full-width row and the results and PGN columns wrap beneath it. Sizes
-   are authored in rem. */
+   At 1180px and below the content is a two-column grid. From 768px up,
+   the board and PGN columns share the first row and the results column
+   takes the full-width second row. Sizes are authored in rem. */
 @media (max-width: 1180px) {
     html, body { height: auto; overflow-y: auto; }
     :root { --pgn-col-w: 18.75rem; }
@@ -11,17 +11,18 @@
         overflow: visible;
         padding: var(--space-4);
     }
-    .left-col {
-        grid-column: 1 / -1;
-        height: auto;
-    }
+    .left-col { height: auto; }
     /* Horizontal auto margins centre a fixed-width flex item on the
        cross axis of a column-direction container. */
     .board-group { margin: 0 auto; }
 
-    .right-col, .pgn-col {
-        height: min(60vh, 520px);
-    }
+    .right-col { height: min(60vh, 520px); }
+}
+
+@media (min-width: 768px) and (max-width: 1180px) {
+    .left-col  { grid-column: 1; grid-row: 1; }
+    .pgn-col   { grid-column: 2; grid-row: 1; contain: size; }
+    .right-col { grid-column: 1 / -1; grid-row: 2; }
 }
 
 /* ── Phone: swipeable screens ───────────────────────────────────────────
