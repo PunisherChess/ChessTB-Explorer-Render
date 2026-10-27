@@ -18,6 +18,8 @@
     flex-shrink: 0;
     user-select: none;
 }
+/* Panel header buttons - same border as the FEN box */
+.panel-header .btn:not(.btn--col-autoplay) { border-color: var(--control-border); }
 .btn:hover:not(:disabled):not(.is-autoplay-disabled) {
     background: var(--surface-3);
     border-color: var(--border-2);
@@ -28,8 +30,9 @@
 
 .btn__icon { width: 0.75rem; height: 0.75rem; opacity: 0.75; }
 
-/* FEN block buttons - same border as the FEN box, except while locked */
+/* FEN block buttons, and panel header buttons on hover - same border as the FEN box, except while locked */
 .fen-block .btn:not(.is-locked):not(.btn--col-autoplay),
+.panel-header .btn:hover:not(:disabled):not(.is-autoplay-disabled),
 .fen-block .btn:not(.is-locked):hover:not(:disabled):not(.is-autoplay-disabled) {
     border-color: var(--control-border);
 }

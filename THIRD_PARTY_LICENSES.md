@@ -90,8 +90,8 @@ only and are not distributed to clients.
 
 | File(s) | Typeface | License | Author |
 |---|---|---|---|
-| `Inter-Regular.woff2`, `Inter-Medium.woff2`, `Inter-SemiBold.woff2` | Inter | `OFL-1.1` | [Rasmus Andersson](https://rsms.me/inter/) |
-| `JetBrainsMono-Regular.woff2`, `JetBrainsMono-Medium.woff2` | JetBrains Mono | `OFL-1.1` | [JetBrains](https://www.jetbrains.com/lp/mono/) |
+| `Inter-Regular.woff2`, `Inter-Medium.woff2`, `Inter-SemiBold.woff2`, `Inter-Bold.woff2` | Inter | `OFL-1.1` | [Rasmus Andersson](https://rsms.me/inter/) |
+| `JetBrainsMono-Regular.woff2`, `JetBrainsMono-Medium.woff2`, `JetBrainsMono-Bold.woff2`, `JetBrainsMono-Italic.woff2` | JetBrains Mono | `OFL-1.1` | [JetBrains](https://www.jetbrains.com/lp/mono/) |
 
 The build copies the fonts to `static/dist/fonts/`.
 

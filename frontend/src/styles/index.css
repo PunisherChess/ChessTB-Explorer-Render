@@ -19,4 +19,5 @@
 @import "./responsive.css" layer(app);
 @import "./surface.css" layer(app);
 @import "./phone.css" layer(app);
+@import "./tablet.css" layer(app);
 @import "./desktop.css" layer(app);

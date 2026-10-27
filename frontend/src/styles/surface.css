@@ -1,8 +1,9 @@
 /* ── Surface style ──────────────────────────────────────────────────────
    Shared by phone (below 768px) and desktop (above 1180px): hairline
    structure, 4px controls, 6px containers, segmented controls, and gold for
-   active states. Tablet widths keep the base styles. Device specifics are in
-   phone.css and desktop.css. */
+   active states. Tablet widths keep the base styles except the results panel,
+   the FEN block, and the PGN header buttons. Device specifics are in
+   phone.css, tablet.css and desktop.css. */
 @media (max-width: 767px), (min-width: 1181px) {
     :root { --autoplay-btn-h: 1.125rem; }
 

@@ -1,7 +1,9 @@
 /* ── Desktop visual style ───────────────────────────────────────────────
-   Above 1180px, controls are ghost buttons with a hairline border, panels
-   keep a bordered 6px container, and the three columns share the board
-   column's height. Shared rules are in surface.css. */
+   Above 1180px, controls outside the FEN block and panel headers are ghost
+   buttons with a hairline border, panels keep a bordered 6px container, and
+   the three columns share the board column's height. The FEN box and the
+   buttons in the FEN block and panel headers keep the filled style used at
+   the other widths. Shared rules are in surface.css. */
 @media (min-width: 1181px) {
     :root {
         --seg-pad: 0.125rem;
@@ -39,13 +41,12 @@
     }
 
     /* ── Controls ───────────────────────────────────────────────────── */
-    .fen-input { background: var(--bg); }
-    .btn:not(.btn--col-autoplay) {
+    .btn:not(.btn--col-autoplay):not(:is(.fen-block, .panel-header) .btn) {
         border-color: var(--border);
         background: transparent;
         font-weight: 500;
     }
-    .btn:hover:not(:disabled):not(.is-autoplay-disabled) {
+    .btn:hover:not(:disabled):not(.is-autoplay-disabled):not(:is(.fen-block, .panel-header) .btn) {
         border-color: var(--border-2);
         background: var(--tonal);
         color: var(--text);
@@ -57,8 +58,8 @@
     .panel-header {
         min-height: 2.75rem;
         padding: var(--space-2) var(--space-4);
-        background: transparent;
     }
+    .results-panel { --seg-bg: var(--surface-2); }
     .metric-tabs {
         min-height: 2.125rem;
         margin: var(--space-3) var(--space-4) var(--space-2);

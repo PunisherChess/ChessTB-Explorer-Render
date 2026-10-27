@@ -1,0 +1,100 @@
+/* ── Tablet visual style ────────────────────────────────────────────────
+   From 768px to 1180px the results panel uses the phone style: tonal
+   controls, segmented metric tabs, and hairline rows. The FEN block and the
+   PGN header buttons use the control shape and type of surface.css. The rest
+   of the board column and the PGN panel keep the base styles. These rules
+   mirror surface.css and phone.css; layout is in responsive.css. */
+@media (min-width: 768px) and (max-width: 1180px) {
+    .results-panel {
+        --seg-pad: 0.1875rem;
+        --seg-bg: var(--surface-2);
+        --autoplay-btn-h: 1.125rem;
+        --row-line: var(--hairline);
+        --col-divider: var(--hairline);
+    }
+    @container results (width < 50rem) {
+        .results-panel .moves-table { --col-divider: transparent; }
+    }
+
+    /* ── FEN block and PGN header buttons ───────────────────────────── */
+    .pgn-panel .btn {
+        border-radius: var(--r-sm);
+        color: var(--text);
+        font-size: var(--text-sm);
+    }
+    .fen-input,
+    .fen-block .btn { border-radius: var(--r-sm); }
+    .fen-block .btn { font-size: var(--text-sm); }
+    .fen-block .btn:not(.is-locked) { color: var(--text); }
+    .btn.btn--lock.is-locked:hover:not(.is-autoplay-disabled) { color: var(--gold); }
+
+    /* ── Controls ───────────────────────────────────────────────────── */
+    .results-panel .btn:not(.btn--col-autoplay) {
+        border-color: var(--control-border);
+        border-radius: var(--r-sm);
+        background: var(--tonal);
+        color: var(--text);
+        font-size: var(--text-sm);
+    }
+    .results-panel .btn:not(.btn--col-autoplay):hover:not(:disabled) {
+        border-color: var(--control-border);
+        background: var(--tonal-hi);
+        color: var(--text);
+    }
+    .results-panel .btn--compact {
+        height: 2.25rem;
+        padding-inline: var(--space-3);
+    }
+    .btn--col-autoplay {
+        min-width: 1.5rem;
+        padding: 0 0.375rem;
+        border-color: transparent;
+        border-radius: var(--r-sm);
+        background: var(--tonal-hi);
+        color: var(--text);
+    }
+    .results-panel .btn--col-autoplay:hover:not(:disabled) {
+        border-color: transparent;
+        background: var(--tonal-hi);
+        color: var(--text);
+    }
+
+    /* ── Panel header and metric tabs ───────────────────────────────── */
+    .results-panel .panel-header {
+        padding: var(--space-3) var(--space-3) var(--space-2);
+        border-bottom: 0;
+    }
+    .results-panel .panel-header__title {
+        font-size: var(--text-lg);
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--text);
+    }
+    .results-panel .metric-tabs {
+        min-height: 2.5rem;
+        margin: var(--space-1) var(--space-3) var(--space-2);
+        padding: var(--seg-pad);
+        gap: var(--seg-pad);
+        border-radius: var(--r-md);
+        background: var(--seg-bg);
+        box-shadow: inset 0 0 0 1px var(--hairline);
+    }
+    .results-panel .metric-tab {
+        border: 0;
+        border-radius: var(--r-sm);
+        background: transparent;
+        box-shadow: none;
+        color: var(--text-dim);
+        font-size: var(--text-sm);
+        letter-spacing: 0;
+    }
+    .results-panel .metric-tab.is-active {
+        background: var(--surface-3);
+        color: var(--gold);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--gold-dim);
+    }
+
+    /* ── Table ──────────────────────────────────────────────────────── */
+    .results-panel .moves-table thead th { background: transparent; }
+}
