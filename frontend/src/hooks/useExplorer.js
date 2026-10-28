@@ -14,13 +14,12 @@ import { buildPgnText, parsePgn } from '../engine/pgnFormat.js';
 
 const DEFAULT_FEN = '4k3/8/8/8/8/8/8/4K2R w - - 0 1';
 
-// The startup and cleared positions are shown as an empty box, for either side
-// to move, so that a pasted FEN replaces them directly.
-function fenInputText(fen) {
+// The startup and cleared positions, for either side to move.
+function isBlankFen(fen) {
     const parts = fen.split(' ');
     parts[1] = 'w';
     const key = parts.join(' ');
-    return key === DEFAULT_FEN || key === CLEARED_FEN ? '' : fen;
+    return key === DEFAULT_FEN || key === CLEARED_FEN;
 }
 
 const AUTO_PLAY_METRICS = Object.keys(METRICS);
@@ -72,6 +71,9 @@ export function useExplorer() {
     const fenInputRef = useRef(null);
     const actionsRef  = useRef({});
     const bootedRef   = useRef(false);
+    // True while the FEN box is blank: set at startup and by Clear, kept through
+    // side-to-move and mode changes.
+    const fenBlankRef = useRef(false);
     // Mirrors autoplayDelayMs for the bootstrap closure.
     const autoplayDelayRef = useRef(autoplayDelayMs);
     useEffect(() => { autoplayDelayRef.current = autoplayDelayMs; }, [autoplayDelayMs]);
@@ -245,7 +247,8 @@ export function useExplorer() {
             if (autoPlayMetricRef.current && !autoPlayMoveInFlightRef.current) stopAutoPlay();
 
             if (fenInputRef.current) {
-                fenInputRef.current.value = fenInputText(nextFen);
+                fenInputRef.current.value = nextFen;
+                fenBlankRef.current = false;
                 fenInputRef.current.classList.remove('is-invalid');
             }
             setFenError(null);
@@ -315,6 +318,19 @@ export function useExplorer() {
         setMoveHistory(Board.getMoveHistory());
         setHistoryInitialized(true);
 
+        function blankFenInput() {
+            if (fenInputRef.current) fenInputRef.current.value = '';
+            fenBlankRef.current = true;
+        }
+
+        // Runs a side-to-move or mode change, leaving a blank FEN box blank.
+        function keepingFenBlank(change) {
+            const blank = fenBlankRef.current;
+            const result = change();
+            if (blank) blankFenInput();
+            return result;
+        }
+
         // ── Public actions ───────────────────────────────────────────────
         function applyFen(rawFen) {
             const norm = normalizeFen(rawFen);
@@ -324,6 +340,7 @@ export function useExplorer() {
                 setFenError(result.reason || 'Invalid position.');
                 return;
             }
+            fenBlankRef.current = false;
             if (fenInputRef.current) fenInputRef.current.classList.remove('is-invalid');
             setFenError(null);
             Tablebase.clearErrorLine();
@@ -333,7 +350,7 @@ export function useExplorer() {
             const parts = Board.currentFen().split(' ');
             if (parts[1] === turnChar) return;
             parts[1] = turnChar;
-            applyFen(parts.join(' '));
+            keepingFenBlank(() => applyFen(parts.join(' ')));
         }
 
         function copyFen() {
@@ -370,7 +387,7 @@ export function useExplorer() {
             Board.drawArrows(bestMovesForArrows(Tablebase.getLastData()));
         }
 
-        function clearBoard() { Board.clear(); }
+        function clearBoard() { Board.clear(); blankFenInput(); }
         function goBack() { Board.goBack(); }
         function goForward() { Board.goForward(); }
         function goToNode(id) { Board.goToNode(id); }
@@ -388,7 +405,7 @@ export function useExplorer() {
         function setShowRootRowAction(next) { Tablebase.setShowRootRow(next); setShowRootRowState(next); }
 
         function setChess960Action(next) {
-            const result = Board.setVariant(next ? VARIANTS.CHESS960 : VARIANTS.STANDARD);
+            const result = keepingFenBlank(() => Board.setVariant(next ? VARIANTS.CHESS960 : VARIANTS.STANDARD));
             if (!result.ok) { toast(result.reason || "Can't switch modes for this position.", 3000); return; }
             setVariant(Board.getVariant());
         }
@@ -420,7 +437,9 @@ export function useExplorer() {
         });
 
         // First probe of the session runs immediately (no debounce).
-        onPositionChange(Board.currentFen(), true);
+        const bootFen = Board.currentFen();
+        onPositionChange(bootFen, true);
+        if (isBlankFen(bootFen)) blankFenInput();
     }, [toast]);
 
     // Auto-play starts its delay once the position's results have rendered.

@@ -241,7 +241,7 @@ REMOTE_POOL_MAXSIZE = None
 # 60 per minute comfortably covers normal browsing and autoplay at its
 # default 1.25s delay; raise it if legitimate autoplay at a fast delay
 # setting gets throttled, or lower it if the deployment sees abuse.
-PROBE_RATE_LIMIT = "60 per minute"
+PROBE_RATE_LIMIT = "120 per minute"
 
 # Per-client-IP limit applied only to requests that identify themselves as
 # background hover-prefetch via the "X-Prefetch: 1" request header (see

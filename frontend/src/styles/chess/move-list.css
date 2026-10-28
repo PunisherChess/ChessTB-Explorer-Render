@@ -165,9 +165,4 @@
        edge. .move-line__cell supplies the White/Black text inset. */
     padding: 0 0 var(--space-4);
 }
-.pgn-panel .panel-header { container: pgn-header / inline-size; }
 .pgn-panel .panel-header .btn__icon { width: 0.875rem; height: 0.875rem; }
-.pgn-panel .btn__label { display: none; }
-@container pgn-header (width >= 12.25rem) {
-    .pgn-panel .btn__label { display: inline; }
-}
