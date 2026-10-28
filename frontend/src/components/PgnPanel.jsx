@@ -79,8 +79,8 @@ function PgnPanel({ moveHistory, startFen, historyInitialized, actions }) {
             className="pgn-panel" label="Game PGN" title="PGN"
             end={
                 <>
-                    <Button id="pgn-btn" compact icon="fileIn" title="Import PGN" aria-label="Import PGN" onClick={actions.openPgnDialog}><span className="btn__label">Import</span></Button>
-                    <Button id="pgn-export-btn" compact icon="fileOut" title="Export PGN" aria-label="Export PGN" onClick={actions.exportPgn}><span className="btn__label">Export</span></Button>
+                    <Button id="pgn-btn" compact iconOnly icon="fileIn" title="Import PGN" aria-label="Import PGN" onClick={actions.openPgnDialog} />
+                    <Button id="pgn-export-btn" compact iconOnly icon="fileOut" title="Export PGN" aria-label="Export PGN" onClick={actions.exportPgn} />
                 </>
             }
         >

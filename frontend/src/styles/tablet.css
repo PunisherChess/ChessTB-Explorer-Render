@@ -21,6 +21,7 @@
         border-radius: var(--r-sm);
         color: var(--text);
         font-size: var(--text-sm);
+        padding-inline: var(--space-3);
     }
     .fen-input,
     .fen-block .btn { border-radius: var(--r-sm); }

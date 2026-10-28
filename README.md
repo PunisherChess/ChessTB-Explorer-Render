@@ -274,8 +274,7 @@ Sizing is CSS-only and is defined in `frontend/src/styles/layout.css`.
 - **PGN column:** above 1180 px, the column is 12.5 rem wide plus up to
   2.5 rem taken from the width left over after the board and the results
   panel width that shows the four metric columns, so the board size and the
-  table text are unchanged. The Import and Export buttons show their labels
-  once the PGN panel header content is at least 12.25 rem wide.
+  table text are unchanged.
 - **Tablet layout:** at 1180 px and below, the root font size is the
   browser default and `--board-size-fit` is `--board-size-cap`, defined in
   `tokens.css` as
@@ -676,10 +675,12 @@ means no persistent disk is needed regardless of plan - see
 ## Usage guide
 
 - **Set a position**: type or paste a FEN into the FEN box and press
-  `Enter` or **Apply**. The box is empty at the startup and cleared
-  positions, so a pasted FEN is entered without clearing it first; an
-  empty box is ignored on submit. The move rankings and best-move arrows
-  update automatically. The castling-availability field accepts `-` or any
+  `Enter` or **Apply**. The box is empty at startup and after **Clear**,
+  so a pasted FEN is entered without clearing it first, and stays empty
+  when the side to move changes; an empty box is ignored on submit. Any
+  FEN entered explicitly is shown in the box, including the startup and
+  cleared positions. The move rankings and best-move arrows update
+  automatically. The castling-availability field accepts `-` or any
   combination of `K`, `Q`, `k`, `q` (each requiring a matching king and
   rook on their home squares); in **Chess960 Mode** it additionally
   accepts X-FEN/Shredder-FEN rook-file letters (`a`-`h` / `A`-`H`). A
@@ -730,9 +731,8 @@ means no persistent disk is needed regardless of plan - see
 - **Import/export a game**: **Import** in the PGN panel (tooltip
   **Import PGN**) opens a dialog to paste PGN text and load the game with
   its variations; **Export** (tooltip **Export PGN**) downloads the
-  current game as `chesstb_game.pgn` with standard headers. Each button shows a
-  document icon with an arrow, and its label when the panel header is wide
-  enough.
+  current game as `chesstb_game.pgn` with standard headers. Both buttons are
+  icon-only, each showing a document icon with an arrow.
 - **Export the move table**: the **CSV** button downloads the current
   DTZ/DTC/DTM/DTM50 rankings as a CSV file.
 - **Share a position**: the URL updates live with `#fen=...`; sending
