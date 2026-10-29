@@ -17,7 +17,7 @@
     transform: translateY(-50%);
     font-size: var(--text-xs); font-weight: 700;
     letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--text-muted);
+    color: var(--gold-heading);
     pointer-events: none; user-select: none; z-index: 1;
 }
 .fen-input {

@@ -37,9 +37,9 @@
     border-color: var(--control-border);
 }
 
-/* FEN block buttons except Lock (its gold marks the locked state) - gold text and border while pressed */
-.fen-block .btn:not(.btn--lock):active:not(:disabled):not(.is-autoplay-disabled),
-.fen-block .btn:not(.btn--lock).is-pressed:not(:disabled):not(.is-autoplay-disabled) {
+/* FEN block and panel header buttons except Lock (its gold marks the locked state) - gold text and border while pressed */
+:is(.fen-block, .panel-header) .btn:not(.btn--lock):active:not(:disabled):not(.is-autoplay-disabled),
+:is(.fen-block, .panel-header) .btn:not(.btn--lock).is-pressed:not(:disabled):not(.is-autoplay-disabled) {
     border-color: var(--gold);
     color: var(--gold);
 }

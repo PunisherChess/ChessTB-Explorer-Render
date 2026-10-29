@@ -1,9 +1,10 @@
 /* ── Tablet visual style ────────────────────────────────────────────────
    From 768px to 1180px the results panel uses the phone style: tonal
    controls, segmented metric tabs, and hairline rows. The FEN block and the
-   PGN header buttons use the control shape and type of surface.css. The rest
-   of the board column and the PGN panel keep the base styles. These rules
-   mirror surface.css and phone.css; layout is in responsive.css. */
+   PGN header buttons use the control shape and type of surface.css, and the
+   PGN title matches the results title. The rest of the board column and the
+   PGN panel keep the base styles. These rules mirror surface.css and
+   phone.css; layout is in responsive.css. */
 @media (min-width: 768px) and (max-width: 1180px) {
     .results-panel {
         --seg-pad: 0.1875rem;
@@ -65,12 +66,12 @@
         padding: var(--space-3) var(--space-3) var(--space-2);
         border-bottom: 0;
     }
-    .results-panel .panel-header__title {
+    .results-panel .panel-header__title,
+    .pgn-panel .panel-header__title {
         font-size: var(--text-lg);
         font-weight: 600;
         letter-spacing: 0;
         text-transform: none;
-        color: var(--text);
     }
     .results-panel .metric-tabs {
         min-height: 2.5rem;

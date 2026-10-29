@@ -205,18 +205,18 @@ literal values. Files are imported into the `reset`, `vendor`, and `app`
 cascade layers by `index.css` and `admin.css`. `surface.css` holds the visual
 style shared by phone and desktop, `phone.css` the phone style (below 768 px),
 and `desktop.css` the desktop style (above 1180 px). `tablet.css` applies the
-phone style to the results panel and the shared control shape and type to the
-FEN block and the PGN header buttons from 768 to 1180 px; the rest of that
-range keeps the base styles.
-Phone and tablet layout and sizing are in `responsive.css`. The results and
-PGN panels use the page background at every viewport width.
+phone style to the results panel, the shared control shape and type to the FEN
+block and the PGN header buttons, and the results title style to the PGN title
+from 768 to 1180 px; the rest of that range keeps the base styles. Phone and
+tablet layout and sizing are in `responsive.css`. The results and PGN panels
+use the page background at every viewport width.
 
 | Token group | Custom properties |
 |---|---|
 | Type scale | `--text-xs` 12 px, `--text-sm` 13 px, `--text-md` 14 px, `--text-lg` 16 px, `--text-xl` 20 px |
 | Spacing | `--space-1` to `--space-6` (4 px to 32 px) |
 | Controls | `--control-h`, `--control-h-sm` (44 px on touch-primary devices; `--control-h` is 40 px below 768 px, where touch buttons keep a 44 px tap area) |
-| Surfaces and accent | `--control-border` (FEN box, FEN block button, panel header button, and turn toggle outlines), `--hairline`, `--tonal`, `--tonal-hi` (rules and control fills) |
+| Surfaces and accent | `--gold-heading` (FEN label and panel titles), `--control-border` (FEN box, FEN block button, panel header button, and turn toggle outlines), `--hairline`, `--tonal`, `--tonal-hi` (rules and control fills) |
 | Rank column | `--rank-pad` (padding of the results and PGN rank columns; `--rank-digits`, set on the results table's container, is the digit count) |
 | Board | `--board-light`, `--board-dark`, `--board-highlight`, read by `engine/theme.js` |
 

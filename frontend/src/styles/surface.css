@@ -88,7 +88,6 @@
         font-weight: 600;
         letter-spacing: 0;
         text-transform: none;
-        color: var(--text);
     }
     .moves-table { --row-line: var(--hairline); }
     .moves-table thead th { background: transparent; }
