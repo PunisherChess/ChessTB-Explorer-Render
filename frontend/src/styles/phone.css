@@ -1,0 +1,79 @@
+/* ── Phone visual style ─────────────────────────────────────────────────
+   Below 48em, controls use tonal fills (the FEN block and panel header
+   buttons keep a thin border) and the results and PGN panels run edge to
+   edge. Shared rules are in surface.css; layout and sizing are in
+   responsive.css. */
+@media (max-width: 47.9375em) {
+    :root {
+        --seg-pad: 0.1875rem;
+        --seg-bg: var(--surface-2);
+        --control-border: var(--hairline);
+    }
+
+    /* ── Controls ───────────────────────────────────────────────────── */
+    /* The FEN block, panel headers, and metric strip keep the solid border
+       used at every width. */
+    .fen-block,
+    .panel-header,
+    .metric-strip { --control-border: var(--border); }
+    .btn:not(.btn--col-autoplay) {
+        border-color: transparent;
+        background: var(--tonal);
+    }
+    .btn:hover:not(:disabled):not(.is-autoplay-disabled) {
+        border-color: transparent;
+        background: var(--tonal-hi);
+        color: var(--text);
+    }
+    .btn--compact { height: 2.25rem; }
+    .btn--compact:not(.results-panel .btn) { padding-inline: var(--space-3); }
+
+    /* ── Panels ─────────────────────────────────────────────────────── */
+    .panel {
+        border: 0;
+        border-radius: 0;
+    }
+    .panel-header {
+        padding: var(--space-2) var(--space-3);
+        border-bottom-color: transparent;
+    }
+    .metric-bar { padding: 0 var(--space-3) var(--space-3); }
+    .metric-strip { --strip-h: 2.5rem; }
+
+    /* ── Tables and move list ───────────────────────────────────────── */
+    .pgn-col .panel-header { border-bottom: 1px solid var(--border); }
+
+    /* ── Screen navigation ──────────────────────────────────────────── */
+    .screen-nav {
+        background: var(--surface);
+        border-top-color: var(--hairline);
+    }
+    .screen-nav__item {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.1875rem;
+        font-size: 0.6875rem;
+        letter-spacing: 0.02em;
+        text-transform: none;
+    }
+    .screen-nav__item .icon {
+        width: 1.375rem;
+        height: 1.375rem;
+        stroke-width: 1.75;
+    }
+    .screen-nav__item[aria-current="page"] { box-shadow: none; }
+    .screen-nav__item[aria-current="page"]::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: 1.75rem;
+        height: 0.1875rem;
+        transform: translateX(-50%);
+        border-radius: 0 0 0.1875rem 0.1875rem;
+        background: var(--gold);
+    }
+}

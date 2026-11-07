@@ -1,3 +1,5 @@
+/** Panel.jsx: titled panel container */
+
 export default function Panel({ label, title, start, end, className = '', children }) {
     return (
         <section className={`panel${className ? ` ${className}` : ''}`} aria-label={label}>

@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Board, VARIANTS } from '../engine/board.js';
+/** useExplorer.js: explorer state, FEN box, PGN, auto-play, settings, and keyboard shortcuts */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Board } from '../engine/board.js';
 import { Tablebase } from '../engine/tablebase.js';
 import { Theme } from '../engine/theme.js';
+import { VARIANTS, METRICS, STORAGE_KEYS, AUTOPLAY_DELAY, ALIGN, CLEARED_FEN } from '../engine/constants.js';
 import * as Storage from '../engine/storage.js';
 import { debounce } from '../engine/utils.js';
 import {
@@ -11,32 +14,28 @@ import { buildPgnText, parsePgn } from '../engine/pgnFormat.js';
 
 const DEFAULT_FEN = '4k3/8/8/8/8/8/8/4K2R w - - 0 1';
 
-const METRIC_CONFIG = {
-    dtz:   { dataKey: 'moves_dtz',   label: 'DTZ'   },
-    dtc:   { dataKey: 'moves_dtc',   label: 'DTC'   },
-    dtm:   { dataKey: 'moves_dtm',   label: 'DTM'   },
-    dtm50: { dataKey: 'moves_dtm50', label: 'DTM50' },
-};
-const AUTO_PLAY_METRICS = Object.keys(METRIC_CONFIG);
+// The startup and cleared positions, for either side to move.
+function isBlankFen(fen) {
+    const parts = fen.split(' ');
+    parts[1] = 'w';
+    const key = parts.join(' ');
+    return key === DEFAULT_FEN || key === CLEARED_FEN;
+}
 
-const AUTO_PLAY_DELAY_MIN_MS  = 0;
-const AUTO_PLAY_DELAY_MAX_MS  = 2500;
-const AUTO_PLAY_DELAY_STEP_MS = 50;
-const AUTO_PLAY_DELAY_DEFAULT_MS = 1250;
-const LS_AUTOPLAY_DELAY_MS = 'chesstb_autoplay_delay_ms';
+const AUTO_PLAY_METRICS = Object.keys(METRICS);
 
 function clampAutoPlayDelayMs(ms) {
-    if (!Number.isFinite(ms)) return AUTO_PLAY_DELAY_DEFAULT_MS;
-    const snapped = Math.round(ms / AUTO_PLAY_DELAY_STEP_MS) * AUTO_PLAY_DELAY_STEP_MS;
-    return Math.min(AUTO_PLAY_DELAY_MAX_MS, Math.max(AUTO_PLAY_DELAY_MIN_MS, snapped));
+    if (!Number.isFinite(ms)) return AUTOPLAY_DELAY.DEFAULT_MS;
+    const snapped = Math.round(ms / AUTOPLAY_DELAY.STEP_MS) * AUTOPLAY_DELAY.STEP_MS;
+    return Math.min(AUTOPLAY_DELAY.MAX_MS, Math.max(AUTOPLAY_DELAY.MIN_MS, snapped));
 }
 function readAutoPlayDelayMs() {
-    const raw = Storage.read(LS_AUTOPLAY_DELAY_MS);
+    const raw = Storage.read(STORAGE_KEYS.AUTOPLAY_DELAY_MS);
     const ms = raw === null ? NaN : parseInt(raw, 10);
-    return Number.isFinite(ms) ? clampAutoPlayDelayMs(ms) : AUTO_PLAY_DELAY_DEFAULT_MS;
+    return Number.isFinite(ms) ? clampAutoPlayDelayMs(ms) : AUTOPLAY_DELAY.DEFAULT_MS;
 }
-export function formatAutoPlayDelay(ms) {
-    return ms === 0 ? '0s' : `${parseFloat((ms / 1000).toFixed(2))}s`;
+function readAlign() {
+    return Storage.read(STORAGE_KEYS.ALIGN) === ALIGN.TOP ? ALIGN.TOP : ALIGN.CENTER;
 }
 
 let _nextToastId = 1;
@@ -51,44 +50,47 @@ export function useExplorer() {
     const [canForward, setCanForward] = useState(false);
     const [moveHistory, setMoveHistory] = useState({ nodes: [], rootChildren: [], rootActiveChild: null, currentId: -1 });
     const [startFen, setStartFen] = useState(DEFAULT_FEN);
-    // The PGN panel stays blank (not even "No moves yet") until Board
-    // reports a move-tree change for the first time - a fresh session
-    // with nothing restored from a link or localStorage never fires that
-    // callback until the player's first action.
+    // The PGN panel stays blank until the bootstrap effect has loaded the
+    // board and any restored game, so "No moves yet" never precedes restored moves.
     const [historyInitialized, setHistoryInitialized] = useState(false);
     const [fenError, setFenError] = useState(null);
 
-    const [tb, setTb] = useState(() => Tablebase.getViewState());
+    const [tb, setTb] = useState(Tablebase.getViewState);
     const [autoplayMetric, setAutoplayMetric] = useState(null);
     const [autoplayAvailability, setAutoplayAvailability] = useState(
-        () => Object.fromEntries(AUTO_PLAY_METRICS.map(m => [m, { disabled: false, title: `Auto-play best ${METRIC_CONFIG[m].label} move` }]))
+        () => Object.fromEntries(AUTO_PLAY_METRICS.map(m => [m, { disabled: false, title: `Auto-play best ${METRICS[m].label} move` }]))
     );
     const [lockAutoplayDisabled, setLockAutoplayDisabled] = useState(false);
 
-    const [showRootRow, setShowRootRowState] = useState(() => Tablebase.getShowRootRow());
-    const [autoplayDelayMs, setAutoplayDelayMsState] = useState(() => readAutoPlayDelayMs());
+    const [showRootRow, setShowRootRowState] = useState(Tablebase.getShowRootRow);
+    const [autoplayDelayMs, setAutoplayDelayMsState] = useState(readAutoPlayDelayMs);
+    const [align, setAlignState] = useState(readAlign);
 
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [pgnDialogOpen, setPgnDialogOpen] = useState(false);
-    const [pgnSnapshots, setPgnSnapshots] = useState([]);
     const [pgnError, setPgnError] = useState('');
     const [toasts, setToasts] = useState([]);
     const [activeMetric, setActiveMetric] = useState('dtz');
 
     const fenInputRef = useRef(null);
-    const tbodyRef    = useRef(null);
     const actionsRef  = useRef({});
     const bootedRef   = useRef(false);
+    // True while the FEN box is blank: set at startup and by Clear, kept through
+    // side-to-move and mode changes.
+    const fenBlankRef = useRef(false);
+    // Mirrors autoplayDelayMs for the bootstrap closure.
+    const autoplayDelayRef = useRef(autoplayDelayMs);
+    useEffect(() => { autoplayDelayRef.current = autoplayDelayMs; }, [autoplayDelayMs]);
 
     // ── Toasts ──────────────────────────────────────────────────────────
-    function toast(message, durationMs = 1800) {
+    const toast = useCallback((message, durationMs = 1800) => {
         const id = _nextToastId++;
         setToasts(prev => [...prev, { id, message, leaving: false }]);
         setTimeout(() => {
             setToasts(prev => prev.map(t => (t.id === id ? { ...t, leaving: true } : t)));
             setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 400);
         }, durationMs);
-    }
+    }, []);
 
     const activeNotesRef = useRef(new Set());
 
@@ -134,12 +136,9 @@ export function useExplorer() {
         const autoPlayMetricRef = { current: null };   // mirrors autoplayMetric state for synchronous checks
 
         function bestMovesForArrows(data) {
-            return {
-                dtz:   data?.dtz_available   ? (data.moves_dtz   || [])[0] || null : null,
-                dtc:   data?.dtc_available   ? (data.moves_dtc   || [])[0] || null : null,
-                dtm:   data?.dtm_available   ? (data.moves_dtm   || [])[0] || null : null,
-                dtm50: data?.dtm50_available ? (data.moves_dtm50 || [])[0] || null : null,
-            };
+            return Object.fromEntries(Object.entries(METRICS).map(([id, m]) => [
+                id, data?.[m.availableKey] ? (data[m.dataKey] || [])[0] || null : null,
+            ]));
         }
 
         function applySetLocked(next, persist = true) {
@@ -169,11 +168,13 @@ export function useExplorer() {
             autoPlayPacingReadyRef.current = false;
             autoPlayDataReadyRef.current = dataAlreadyReady;
             clearTimeout(autoPlayTimerRef.current);
+            autoPlayTimerRef.current = null;
+            if (!dataAlreadyReady) return;
             autoPlayTimerRef.current = setTimeout(() => {
                 if (cycleId !== autoPlayCycleIdRef.current) return;
                 autoPlayPacingReadyRef.current = true;
                 tryPlayAutoPlayMove(cycleId);
-            }, actionsRef.current.getAutoplayDelayMs());
+            }, autoplayDelayRef.current);
         }
 
         function tryPlayAutoPlayMove(cycleId) {
@@ -184,7 +185,7 @@ export function useExplorer() {
             const metric = autoPlayMetricRef.current;
             const data = Tablebase.getLastData();
             if (!data) return;
-            const moves = data[METRIC_CONFIG[metric].dataKey] || [];
+            const moves = data[METRICS[metric].dataKey] || [];
             const best = moves.find(m => m.outcome !== 'unknown' && m.available !== false);
             if (!best) { stopAutoPlay(); return; }
             autoPlayMoveInFlightRef.current = true;
@@ -195,14 +196,19 @@ export function useExplorer() {
             armAutoPlayWait(false);
         }
 
+        function resultsMatchBoard() {
+            return Tablebase.getLastFen() === Board.currentFen() &&
+                   Tablebase.getLastVariant() === Board.getVariant();
+        }
+
         function onAutoPlayResult() {
-            if (!autoPlayMetricRef.current) return;
-            autoPlayDataReadyRef.current = true;
-            tryPlayAutoPlayMove(autoPlayCycleIdRef.current);
+            if (!autoPlayMetricRef.current || autoPlayDataReadyRef.current) return;
+            if (!resultsMatchBoard()) return;
+            armAutoPlayWait(true);
         }
 
         function startAutoPlay(metric) {
-            if (!METRIC_CONFIG[metric]) return;
+            if (!METRICS[metric]) return;
             stopAutoPlay();
             autoPlayMetricRef.current = metric;
             setAutoplayMetric(metric);
@@ -211,16 +217,10 @@ export function useExplorer() {
                 applySetLocked(true, false);
             }
             setLockAutoplayDisabled(true);
-            const dataAlreadyReady = Tablebase.getLastFen() === Board.currentFen() &&
-                                      Tablebase.getLastVariant() === Board.getVariant();
-            armAutoPlayWait(dataAlreadyReady);
+            armAutoPlayWait(resultsMatchBoard());
         }
 
         function updateAutoplayAvailability(data) {
-            const availableByMetric = {
-                dtz: data?.dtz_available, dtc: data?.dtc_available,
-                dtm: data?.dtm_available, dtm50: data?.dtm50_available,
-            };
             const rootWdlByMetric = {
                 dtz: data?.wdl,
                 dtc: Array.isArray(data?.dtc) ? data.dtc[0] : null,
@@ -229,18 +229,22 @@ export function useExplorer() {
             };
             const next = {};
             AUTO_PLAY_METRICS.forEach(metric => {
-                const unavailable = availableByMetric[metric] === false;
+                const unavailable = data?.[METRICS[metric].availableKey] === false;
                 const isDraw = !unavailable && rootWdlByMetric[metric] === 0;
-                if (unavailable || isDraw) {
+                const moves = data?.[METRICS[metric].dataKey];
+                const noMoves = !unavailable && !isDraw && Array.isArray(moves) && moves.length === 0;
+                if (unavailable || isDraw || noMoves) {
                     if (autoPlayMetricRef.current === metric) stopAutoPlay();
                     next[metric] = {
                         disabled: true,
                         title: unavailable
-                            ? `Auto-play unavailable — no ${METRIC_CONFIG[metric].label} table for this material`
-                            : `${METRIC_CONFIG[metric].label} auto-play unavailable — position is a draw`,
+                            ? `Auto-play unavailable - no ${METRICS[metric].label} table for this material`
+                            : isDraw
+                                ? `${METRICS[metric].label} auto-play unavailable - position is a draw`
+                                : `${METRICS[metric].label} auto-play unavailable - no legal moves`,
                     };
                 } else {
-                    next[metric] = { disabled: false, title: `Auto-play best ${METRIC_CONFIG[metric].label} move` };
+                    next[metric] = { disabled: false, title: `Auto-play best ${METRICS[metric].label} move` };
                 }
             });
             setAutoplayAvailability(next);
@@ -252,6 +256,7 @@ export function useExplorer() {
 
             if (fenInputRef.current) {
                 fenInputRef.current.value = nextFen;
+                fenBlankRef.current = false;
                 fenInputRef.current.classList.remove('is-invalid');
             }
             setFenError(null);
@@ -263,7 +268,7 @@ export function useExplorer() {
             writeHash(nextFen, Board.getVariant());
             Board.clearArrows();
 
-            const count = Board.legalMoveCount();
+            const count = Board.isInsufficientMaterial() ? 0 : Board.legalMoveCount();
             Tablebase.setMoveCount(count > 0 ? `${count} legal move${count === 1 ? '' : 's'}` : '');
 
             const onProbeError = () => setReady(true);
@@ -272,6 +277,7 @@ export function useExplorer() {
                 debouncedProbe.cancel();
                 Tablebase.probe(nextFen, activeVariant, onProbeError);
             } else {
+                Tablebase.markPending();
                 debouncedProbe(nextFen, activeVariant, onProbeError);
             }
         }
@@ -289,11 +295,10 @@ export function useExplorer() {
             Board.drawArrows(bestMovesForArrows(data));
             updateAutoplayAvailability(data);
             setReady(true);
-            onAutoPlayResult();
         });
         Tablebase.setMoveSelectHandler(san => {
             const played = Board.playMove(san);
-            if (!played) toast('Illegal move — this position may have changed.');
+            if (!played) toast('Illegal move - this position may have changed.');
         });
         Tablebase.setNoteHandler(message => {
             const active = activeNotesRef.current;
@@ -308,19 +313,31 @@ export function useExplorer() {
         Theme.init(Board.reconstruct);
         setReady(false);
         const boardInit = Board.init(onPositionChange, initialFen, initialVariant);
-        if (!boardInit.ok) toast(boardInit.reason || 'Invalid starting position — loaded the default position instead.');
+        if (!boardInit.ok) toast(boardInit.reason || 'Invalid starting position - loaded the default position instead.');
         if (restoreGame) {
             Board.restoreTree(restoreGame.startFen, restoreGame.nodes, restoreGame.rootChildren, restoreGame.rootActiveChild, restoreGame.currentId);
         }
         Theme.apply();
 
-        setVariant(Board.getVariant());
+        // fen, variant, undo/redo state and the FEN box are set by the
+        // onPositionChange call at the end of this effect.
         setLockedState(Board.isLocked());
-        setFen(Board.currentFen());
         setStartFen(Board.getStartFen());
-        setCanBack(Board.canGoBack());
-        setCanForward(Board.canGoForward());
-        if (fenInputRef.current) fenInputRef.current.value = Board.currentFen();
+        setMoveHistory(Board.getMoveHistory());
+        setHistoryInitialized(true);
+
+        function blankFenInput() {
+            if (fenInputRef.current) fenInputRef.current.value = '';
+            fenBlankRef.current = true;
+        }
+
+        // Runs a side-to-move or mode change, leaving a blank FEN box blank.
+        function keepingFenBlank(change) {
+            const blank = fenBlankRef.current;
+            const result = change();
+            if (blank) blankFenInput();
+            return result;
+        }
 
         // ── Public actions ───────────────────────────────────────────────
         function applyFen(rawFen) {
@@ -331,6 +348,7 @@ export function useExplorer() {
                 setFenError(result.reason || 'Invalid position.');
                 return;
             }
+            fenBlankRef.current = false;
             if (fenInputRef.current) fenInputRef.current.classList.remove('is-invalid');
             setFenError(null);
             Tablebase.clearErrorLine();
@@ -340,25 +358,36 @@ export function useExplorer() {
             const parts = Board.currentFen().split(' ');
             if (parts[1] === turnChar) return;
             parts[1] = turnChar;
-            applyFen(parts.join(' '));
+            keepingFenBlank(() => applyFen(parts.join(' ')));
         }
 
         function copyFen() {
             navigator.clipboard.writeText(Board.currentFen())
                 .then(() => toast('FEN copied!'))
                 .catch(() => {
-                    fenInputRef.current?.select();
-                    document.execCommand('copy');
+                    const input = fenInputRef.current;
+                    if (input) {
+                        const shown = input.value;
+                        input.value = Board.currentFen();
+                        input.select();
+                        document.execCommand('copy');
+                        input.value = shown;
+                    }
                     toast('FEN copied!');
                 });
         }
 
-        function copyPgnText() {
+        function exportPgn() {
             const text = buildPgnText();
-            if (!text) { toast('No moves to copy.'); return; }
-            navigator.clipboard.writeText(text)
-                .then(() => toast('PGN copied!'))
-                .catch(() => toast('Could not copy PGN.'));
+            if (!text) { toast('No moves to export.'); return; }
+            const url = URL.createObjectURL(new Blob([text + '\n'], { type: 'application/x-chess-pgn;charset=utf-8' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'chesstb_game.pgn';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         function flip() {
@@ -366,7 +395,7 @@ export function useExplorer() {
             Board.drawArrows(bestMovesForArrows(Tablebase.getLastData()));
         }
 
-        function clearBoard() { Board.clear(); }
+        function clearBoard() { Board.clear(); blankFenInput(); }
         function goBack() { Board.goBack(); }
         function goForward() { Board.goForward(); }
         function goToNode(id) { Board.goToNode(id); }
@@ -384,55 +413,58 @@ export function useExplorer() {
         function setShowRootRowAction(next) { Tablebase.setShowRootRow(next); setShowRootRowState(next); }
 
         function setChess960Action(next) {
-            const result = Board.setVariant(next ? VARIANTS.CHESS960 : VARIANTS.STANDARD);
+            const result = keepingFenBlank(() => Board.setVariant(next ? VARIANTS.CHESS960 : VARIANTS.STANDARD));
             if (!result.ok) { toast(result.reason || "Can't switch modes for this position.", 3000); return; }
             setVariant(Board.getVariant());
         }
 
         function setAutoplayDelayAction(ms) {
             const clamped = clampAutoPlayDelayMs(ms);
-            Storage.write(LS_AUTOPLAY_DELAY_MS, clamped);
+            Storage.write(STORAGE_KEYS.AUTOPLAY_DELAY_MS, clamped);
             setAutoplayDelayMsState(clamped);
         }
-        function getAutoplayDelayMs() { return actionsRef.current.autoplayDelayMsLive; }
+
+        function setAlignAction(next) {
+            const value = next === ALIGN.TOP ? ALIGN.TOP : ALIGN.CENTER;
+            Storage.write(STORAGE_KEYS.ALIGN, value);
+            setAlignState(value);
+        }
 
         function openPgnDialog() { setPgnDialogOpen(true); setPgnError(''); }
         function closePgnDialog() { setPgnDialogOpen(false); }
         function parsePgnAction(text) {
             const result = parsePgn(text);
             if (!result.ok) { setPgnError(result.error); return; }
+            const loaded = Board.importGame(result.tree, result.variant);
+            if (!loaded.ok) { setPgnError(loaded.reason); return; }
             setPgnError('');
-            setPgnSnapshots(result.snapshots);
-            actionsRef.current.pgnImportedVariant = result.variant;
-        }
-        function loadPgnSnapshot(snapFen) {
-            const norm = normalizeFen(snapFen);
-            const result = Board.setPositionAndVariant(norm, actionsRef.current.pgnImportedVariant || VARIANTS.STANDARD);
-            if (!result.ok) { toast(result.reason || 'Could not load that position.'); return; }
             closePgnDialog();
         }
 
         // Exposed to components via the stable actionsRef object.
         Object.assign(actionsRef.current, {
-            applyFen, setTurn, copyFen, copyPgnText, flip, clearBoard, goBack, goForward, goToNode,
+            applyFen, setTurn, copyFen, exportPgn, flip, clearBoard, goBack, goForward, goToNode,
             setLockedAction, toggleAutoPlay, setShowRootRowAction, setChess960Action,
-            setAutoplayDelayAction, getAutoplayDelayMs, openPgnDialog, closePgnDialog,
-            parsePgnAction, loadPgnSnapshot, toast, setActiveMetric,
+            setAutoplayDelayAction, setAlignAction, onAutoPlayResult, openPgnDialog, closePgnDialog,
+            parsePgnAction,
             exportCsv: Tablebase.exportCsv,
-            pgnImportedVariant: VARIANTS.STANDARD,
-            autoplayDelayMsLive: readAutoPlayDelayMs(),
         });
 
-        // Very first probe of the session runs immediately (no debounce).
-        onPositionChange(Board.currentFen(), true);
-    }, []);
+        // First probe of the session runs immediately (no debounce).
+        const bootFen = Board.currentFen();
+        onPositionChange(bootFen, true);
+        if (isBlankFen(bootFen)) blankFenInput();
+    }, [toast]);
 
-    // Keep the ref mirror of autoplayDelayMs current for armAutoPlayWait's
-    // synchronous read (it can't see React state directly from inside a
-    // closure captured once at bootstrap).
+    // Auto-play starts its delay once the position's results have rendered.
+    // Two frames also let a zero-delay run show each position's results.
     useEffect(() => {
-        actionsRef.current.autoplayDelayMsLive = autoplayDelayMs;
-    }, [autoplayDelayMs]);
+        if (!autoplayMetric || tb.pending || tb.loading) return;
+        let frame = requestAnimationFrame(() => {
+            frame = requestAnimationFrame(() => actionsRef.current.onAutoPlayResult());
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [tb, autoplayMetric]);
 
     // ── Keyboard shortcuts ──────────────────────────────────────────────
     useEffect(() => {
@@ -461,23 +493,28 @@ export function useExplorer() {
             const newVariant = readHashVariant() || VARIANTS.STANDARD;
             const result = Board.setPositionAndVariant(normalizeFen(newFen), newVariant);
             if (!result.ok) {
-                actionsRef.current.toast(result.reason || 'Invalid position in URL.');
+                toast(result.reason || 'Invalid position in URL.');
                 writeHash(Board.currentFen(), Board.getVariant());
             }
         }
         window.addEventListener('hashchange', onHashChange);
         return () => window.removeEventListener('hashchange', onHashChange);
-    }, []);
+    }, [toast]);
 
+    // Referentially stable: each property is a forwarding function to
+    // actionsRef, which bootstrap fills in.
     const actions = useMemo(() => new Proxy({}, {
-        get: (_t, prop) => (...args) => actionsRef.current[prop]?.(...args),
+        get(target, prop) {
+            if (typeof prop !== 'string') return undefined;
+            return (target[prop] ??= (...args) => actionsRef.current[prop]?.(...args));
+        },
     }), []);
 
     return {
         ready, fen, variant, locked, canBack, canForward, moveHistory, startFen, historyInitialized, fenError,
         tb, autoplayMetric, autoplayAvailability, lockAutoplayDisabled,
-        showRootRow, autoplayDelayMs, settingsOpen, setSettingsOpen,
-        pgnDialogOpen, pgnSnapshots, pgnError, toasts, activeMetric,
-        fenInputRef, tbodyRef, actions,
+        showRootRow, autoplayDelayMs, align, settingsOpen, setSettingsOpen,
+        pgnDialogOpen, pgnError, toasts, activeMetric,
+        fenInputRef, actions, setActiveMetric,
     };
 }

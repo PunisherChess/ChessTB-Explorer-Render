@@ -1,3 +1,5 @@
+/** scroll.js: scrolls an element into view within a container only */
+
 // Scrolls `el` into view within `container` only - never any ancestor
 // beyond it (unlike Element.scrollIntoView(), which would also drag the
 // mobile screen-carousel over to whichever panel is calling this).
@@ -20,7 +22,7 @@ export function scrollIntoViewWithin(el, container) {
 // While .moves-body-scroll overflows vertically, its scrollbar narrows the
 // content box. The body table is widened by the scrollbar's measured width
 // so its columns keep the same pixel widths as the header table's.
-export function syncMovesGutter() {
+function syncMovesGutter() {
     const scroller = document.querySelector('.moves-body-scroll');
     if (!scroller) return;
     if (scroller.scrollHeight <= scroller.clientHeight + 1) {

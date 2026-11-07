@@ -1,4 +1,4 @@
-"""Resolves rounded DTZ values by cross-checking a position's moves.
+"""dtz_anchor.py: resolves rounded DTZ values by cross-checking a position's moves.
 
 A rounded DTZ stands for a few candidate values. The root's DTZ is the best
 value among the moves that keep its class (smallest when winning, largest

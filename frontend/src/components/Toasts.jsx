@@ -1,4 +1,8 @@
-export default function Toasts({ toasts }) {
+/** Toasts.jsx: toast notification container */
+
+import { memo } from 'react';
+
+function Toasts({ toasts }) {
     return (
         <div id="toast-container" className="toast-container" aria-live="polite" aria-atomic="false">
             {toasts.map(t => (
@@ -7,3 +11,5 @@ export default function Toasts({ toasts }) {
         </div>
     );
 }
+
+export default memo(Toasts);

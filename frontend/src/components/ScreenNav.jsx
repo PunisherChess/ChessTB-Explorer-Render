@@ -1,8 +1,15 @@
-import { useEffect, useState } from 'react';
+/** ScreenNav.jsx: screen navigation bar for the phone layout */
 
-const SCREENS = ['Board', 'Results', 'Moves'];
+import { memo, useEffect, useState } from 'react';
+import Icon from './ui/Icon.jsx';
 
-export default function ScreenNav() {
+const SCREENS = [
+    { label: 'Board', icon: 'grid' },
+    { label: 'Results', icon: 'bars' },
+    { label: 'Moves', icon: 'list' },
+];
+
+function ScreenNav() {
     const [current, setCurrent] = useState(0);
 
     useEffect(() => {
@@ -22,12 +29,15 @@ export default function ScreenNav() {
 
     return (
         <nav className="screen-nav" aria-label="Screens">
-            {SCREENS.map((label, i) => (
+            {SCREENS.map(({ label, icon }, i) => (
                 <button key={label} type="button" className="screen-nav__item"
                         aria-current={i === current ? 'page' : undefined} onClick={() => goTo(i)}>
-                    {label}
+                    <Icon name={icon} />
+                    <span>{label}</span>
                 </button>
             ))}
         </nav>
     );
 }
+
+export default memo(ScreenNav);

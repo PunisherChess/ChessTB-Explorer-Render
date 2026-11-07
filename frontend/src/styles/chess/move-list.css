@@ -9,14 +9,15 @@
    has to be painted on something. A line that opens or closes on a
    single colour (a custom starting FEN, the last move being White's
    with no reply yet, or a move that had a variation - see
-   .move-line__variation below) leaves the other cell of that row empty.
-   The rank column is --pgn-rank-w, close to 1.5x the results table's
-   rank column; the remaining space is split evenly between the White
-   and Black columns. */
+   .move-line__variations below) leaves the other cell of that row empty.
+   The rank column is as wide as its widest number, with the results
+   table's rank column width as the minimum (two digits plus --rank-pad),
+   or 14% of the list width in the phone layout, as in the results table's
+   single-metric view; the remaining space is split evenly between the
+   White and Black columns. */
 .move-line {
-    --pgn-rank-width: var(--pgn-rank-w);
     display: grid;
-    grid-template-columns: var(--pgn-rank-width) 1fr 1fr;
+    grid-template-columns: auto 1fr 1fr;
     align-items: center;
     font-size: var(--text-xs);
     padding: 0;
@@ -30,7 +31,7 @@
     grid-template-columns: subgrid;
     grid-column: 1 / -1;
     align-items: baseline;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--row-line);
 }
 .move-line__empty {
     grid-column: 1 / -1;
@@ -38,7 +39,6 @@
     text-align: center;
     color: var(--text-muted);
     font-size: var(--text-xs);
-    font-style: italic;
 }
 .move-line__num {
     color: var(--text-muted);
@@ -48,27 +48,31 @@
     padding: var(--space-1) 0;
     user-select: none;
 }
+.move-line__row > .move-line__num {
+    min-width: calc(2ch + var(--rank-pad));
+    padding-inline: calc(var(--rank-pad) / 2);
+}
 .move-line__cell {
     position: relative;
     min-width: 0;
     padding: var(--space-1) var(--space-3);
 }
+.move-line__cell--black { margin-right: var(--space-2); }
 /* Visible separator between the rank column and the White-move column,
-   matching the border between the Rank and DTZ Move columns in
-   .moves-table. Drawn as an unrounded pseudo-element rather than a
-   border on the White cell itself: that cell also has a border-radius
-   for its own hover/current-state background (below), and a straight
-   border on a rounded box gets rounded off with it, curving the
+   matching the divider between the Rank and DTZ Move columns in
+   .moves-table: the same --col-divider shadow on a box that spans the
+   cell, so both rasterise identically at every display scale. The box is
+   an unrounded overlay rather than the White cell itself: that cell also
+   has a border-radius for its own hover/current-state background (below),
+   and the shadow of a rounded box follows the rounding, curving the
    separator's own ends. No separator between the White and Black
    columns, matching the borderless boundary between a Move column and
    its own Score column in .moves-table. */
 .move-line__cell--white::before {
     content: "";
     position: absolute;
-    inset-block: 0;
-    inset-inline-start: 0;
-    width: 1px;
-    background: var(--border-2);
+    inset: 0;
+    box-shadow: var(--col-divider);
     pointer-events: none;
 }
 /* A main-line cell always holds exactly one move, so the whole cell is
@@ -91,7 +95,6 @@
 }
 .move-line__cell:not(.move-line__cell--empty).is-current .move-line__move {
     color: var(--text);
-    font-weight: 600;
 }
 /* The PGN ellipsis placeholder in a row that opens on Black (see
    buildMainLine() in moveLine.js) - muted like the rank label, since it's a
@@ -110,20 +113,51 @@
     padding: 0;
 }
 /* Variations (alternate moves reached by navigating back and playing
-   something different): each one is its own paragraph spanning the
-   full grid width, indented under the move it branches from rather
-   than packed into that move's own cell, in a smaller/dimmer font. A
-   variation whose own move also has alternatives interrupts its
-   paragraph for a nested, more deeply indented one, then resumes in a
-   fresh paragraph at its own indent, so nesting reads as a tree.
-   Bordered on its own bottom edge like a main-line row, for the same
-   flush, borders-only row rhythm - but never the Rank/White vertical
-   separator above, since a variation paragraph has no
+   something different): all alternatives to one main-line move, nested
+   lines included, form a single block spanning the full grid width.
+   The block is bordered on its bottom edge like a main-line row, so it
+   sits between two row separators with none between its own lines, and
+   never has the Rank/White vertical separator above, since it has no
    .move-line__cell--white of its own. */
-.move-line__variation {
+.move-line__variations {
+    position: relative;
     grid-column: 1 / -1;
-    padding: var(--space-1) var(--space-3) var(--space-1) 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--row-line);
+}
+/* Branch connectors: one SVG path per variation block, measured in CSS pixels
+   by VariationGroup in PgnPanel.jsx. */
+.move-line__connectors {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+.move-line__connectors path {
+    fill: none;
+    stroke: var(--border-2);
+    stroke-width: 1;
+    stroke-linecap: butt;
+    stroke-linejoin: miter;
+    vector-effect: non-scaling-stroke;
+    shape-rendering: geometricPrecision;
+}
+/* Each line is its own paragraph, indented under the move it branches
+   from rather than packed into that move's own cell, in a smaller/dimmer
+   font. A variation whose own move also has alternatives ends its
+   paragraph; each alternative follows as a paragraph one level deeper, so
+   nesting reads as a tree. The first level starts at --indent-base, which
+   puts its connector under the centre of the move-number column; each
+   level adds 1.5rem. */
+.move-line__variation {
+    --indent-base: 1.5rem;
+    position: relative;
+    z-index: 1;
+    padding: var(--space-1) var(--space-3) var(--space-1)
+        calc(var(--indent-base) + (var(--depth) - 1) * 1.5rem);
     color: var(--text-muted);
     font-size: var(--text-xs);
     line-height: 1.6;
@@ -131,12 +165,22 @@
 .move-line__num--inline {
     margin-right: 0.1875rem;
 }
+/* A short second alternative, placed in its line after the move it replaces. */
+.move-line__inline {
+    margin: 0 0.375rem 0 0.125rem;
+    font-style: italic;
+    opacity: 0.8;
+}
+.move-line__inline::before { content: '('; }
+.move-line__inline::after { content: ')'; margin-left: -0.1875rem; }
+.move-line__inline > :last-child { margin-right: 0; }
 /* A variation paragraph holds more than one move, so - unlike a
    main-line cell - each move is its own hover/click target: a tight
-   chip around just that move's text. */
+   chip around only that move's text. */
 .move-line__move--chip {
     color: inherit;
     font-size: inherit;
+    font-style: inherit;
     font-weight: 500;
     border: 1px solid transparent;
     border-radius: var(--r-sm);
@@ -150,7 +194,6 @@
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--text);
-    font-weight: 600;
 }
 
 /* ── PGN panel ──────────────────────────────────────────────────────── */
@@ -164,3 +207,4 @@
        edge. .move-line__cell supplies the White/Black text inset. */
     padding: 0 0 var(--space-4);
 }
+.pgn-panel .panel-header .btn__icon { width: 0.875rem; height: 0.875rem; }

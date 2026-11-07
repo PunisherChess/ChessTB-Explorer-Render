@@ -15,7 +15,7 @@ body.admin-page {
     margin-bottom: var(--space-5);
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 0.625rem;
 }
 /* Colour and hover come from the global `a` rule in base.css. Targeted by
    class rather than `h1 a` because h1 may also hold the GitHub icon
@@ -46,13 +46,13 @@ body.admin-page {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
-    padding: 20px;
+    padding: 1.25rem;
 }
 
 .admin-page .stat {
     display: flex;
     justify-content: space-between;
-    padding: 6px 0;
+    padding: 0.375rem 0;
     border-bottom: 1px solid var(--border);
     font-size: var(--text-sm);
 }
@@ -65,9 +65,9 @@ body.admin-page {
 }
 
 .admin-page .bar-wrap {
-    height: 8px;
+    height: 0.5rem;
     background: var(--border);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     overflow: hidden;
     margin: var(--space-2) 0 var(--space-3);
 }
@@ -75,28 +75,27 @@ body.admin-page {
 .admin-page .bar-fill {
     height: 100%;
     background: linear-gradient(90deg, var(--progress-from), var(--progress-to));
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     transition: width 0.4s;
 }
 
 .admin-page .toolbar-row {
     display: flex;
     gap: var(--space-2);
-    margin-bottom: 20px;
+    margin-bottom: 1.25rem;
 }
 
 /* Destructive-action modifier for the shared `.btn` component (the
    Refresh button next to it needs no modifier - plain `.btn` already
-   matches). Follows the same pattern as `.btn--apply`'s gold accent,
-   using the `--loss-glow` token for the hover fill. */
+   matches). Uses the `--loss-glow` token for the hover fill. */
 .admin-page .btn.danger { border-color: var(--loss); color: var(--loss); }
 .admin-page .btn.danger:hover { background: var(--loss-glow); border-color: var(--loss); }
 
 .admin-page .status {
     font-size: var(--text-xs);
     color: var(--text-muted);
-    margin-top: 10px;
-    min-height: 18px;
+    margin-top: 0.625rem;
+    min-height: 1.125rem;
 }
 .admin-page .status.ok  { color: var(--win); }
 .admin-page .status.err { color: var(--loss); }
@@ -105,54 +104,12 @@ body.admin-page {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    margin-bottom: 20px;
+    margin-bottom: 1.25rem;
     font-size: var(--text-xs);
     color: var(--text-muted);
 }
-
-/* Login card for GET /admin without a valid session. Centered fixed-width
-   panel; reuses `.card`'s background, border and radius. */
-.admin-page .login-card {
-    max-width: 320px;
-    margin: 15vh auto 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    padding: 28px;
-    text-align: center;
-}
-.admin-page .login-card h1 { justify-content: center; margin-bottom: var(--space-2); }
-.admin-page .login-card__hint {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    margin-bottom: var(--space-4);
-}
-.admin-page .login-card__back { display: block; margin-top: var(--space-4); font-size: var(--text-sm); }
-
-/* Same recipe as FenBar.jsx's `.fen-input`, minus the icon padding;
-   this field has no leading icon. */
-.admin-page .login-input {
-    width: 100%;
-    height: 34px;
-    padding: 0 10px;
-    margin-bottom: var(--space-3);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    outline: none;
-    text-align: center;
-    transition: border-color var(--tr), box-shadow var(--tr);
-}
-.admin-page .login-input:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 2px var(--gold-glow); }
 
 @media (max-width: 640px) {
     .admin-page .grid { grid-template-columns: 1fr; }
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-@media (hover: none) and (pointer: coarse) {
-    .admin-page .login-input { font-size: var(--text-lg); }
-}

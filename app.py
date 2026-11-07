@@ -1,75 +1,38 @@
 """
 app.py: ChessTB Explorer back-end
 
-A single-file Flask application that probes a ChessTB endgame tablebase
-for a submitted FEN position and returns every legal move ranked by
-Distance to Zeroing (DTZ), Distance to Conversion (DTC), Distance to
-Mate (DTM), and DTM under the 50-move rule (DTM50).
+Flask application that probes a ChessTB endgame tablebase for a submitted
+FEN and returns every legal move ranked by DTZ, DTC, DTM, and DTM50, with a
+child_fen per move for pre-fetching and a wins/draws/losses/unknown summary.
+Routes are documented in README.md and openapi.yaml.
 
-DTC is 50-move-rule-aware in the same way DTM50 is (it is always probed
-at the position's own halfmove clock), but unlike DTM50 it has no
-"flat"/clock-independent sibling column of its own -- there is only ever
-one DTC value for a position. A ``.lzdtc`` table only exists for material
-with at least one pawn; for pawnless material `chess.chesstb` derives an
-equivalent answer from DTZ/WDL instead (see chess.chesstb.ProbeResult),
-so `has_dtc` is False only when a pawnful material's own
-`.lzdtc` file genuinely hasn't been generated/shipped.
+  - Admin: /admin answers an unauthenticated client with an HTTP Basic
+    challenge (ADMIN_TOKEN as the password) and also accepts a session
+    cookie. /admin/cache/* accept a session cookie from /admin/login or an
+    "Authorization: Bearer <ADMIN_TOKEN>" header.
+  - Rate limits: /probe and /probe/stream are limited per client IP
+    (PROBE_RATE_LIMIT) and answer 429 with a JSON body. /admin/login and
+    /admin requests carrying credentials share ADMIN_LOGIN_RATE_LIMIT.
+  - Variant: every probe request carries an explicit "variant" ("standard"
+    or "chess960", default "standard"), never inferred from the FEN, since
+    the orthodox start position is also a legal Chess960 position. The
+    castling field accepts "-" or any of K, Q, k, q for standard, plus
+    rook-file letters for chess960; a right with no matching king/rook pair
+    is rejected by _validate_and_build_board.
+  - DTC: probed at the position's own halfmove clock, with one value per
+    position. A `.lzdtc` table exists only for material with a pawn; for
+    pawnless material `chess.chesstb` derives DTC from DTZ/WDL, so `has_dtc`
+    is False only when a pawnful material's `.lzdtc` file is absent.
+  - Coverage: a position without a table raises MissingTableError, returned
+    as JSON {error_code, piece_count}.
 
-Routes
-------
-  POST /probe              - evaluate a FEN position (JSON)
-  POST /probe/stream       - evaluate with SSE streaming progress
-  GET  /                   - main UI
-  GET  /health             - readiness check
-  GET  /admin              - cache dashboard HTML page, or a login form if not authenticated
-  POST /admin/login        - start an admin session (JSON {token})
-  POST /admin/logout       - end the admin session
-  POST /admin/cache/clear  - purge both LRU caches
-  GET  /admin/cache/stats  - cache hit-rate statistics
-  GET  /openapi.yaml       - OpenAPI 3.0 specification
-
-/admin and /admin/cache/* require admin authentication -- either a
-session cookie started via /admin/login, or an "Authorization: Bearer
-<ADMIN_TOKEN>" header. See config.py's "Admin" section and README.md's
-"Security notes" for how ADMIN_TOKEN is configured.
-
-/probe and /probe/stream are rate-limited per client IP (config.py's
-PROBE_RATE_LIMIT); a client over the limit gets a 429 with a JSON body.
-/admin/login has its own, separate limit (config.py's
-ADMIN_LOGIN_RATE_LIMIT), covering both failed and successful attempts.
-
-Each move entry includes a child_fen so the client can pre-fetch the next
-probe, and each response includes a summary of wins/draws/losses/unknown
-across all legal moves. A position not covered by the loaded tablebase
-raises MissingTableError, which is returned as structured JSON
-({error_code, piece_count}). Root-JSON and child-probe cache sizes are set
-by config.EVALUATE_CACHE_SIZE / config.PROBE_CACHE_SIZE.
-
-Every request to /probe and /probe/stream carries an explicit "variant"
-field ("standard" or "chess960", defaulting to "standard" when omitted)
-alongside "fen" -- the two rulesets are never inferred from a FEN's
-contents, since the orthodox starting arrangement is itself a legal
-Chess960 starting position and would otherwise be ambiguous. A submitted
-FEN's castling-availability field accepts "-" or any combination of "K",
-"Q", "k", "q" for variant="standard", plus rook-file letters ("a"-"h" /
-"A"-"H") for variant="chess960"; a right with no matching king/rook pair
-is rejected as invalid input before the board is ever probed (see
-_validate_and_build_board). A position with castling rights is otherwise
-probed like any other: `chess.chesstb` resolves it when the loaded
-tablebase set carries a table for that material (see config.py's
-TABLEBASE_PATH_CASTLING and tablebase_router.py -- unaffected by variant,
-since a Chess960 board's clean_castling_rights() reports the same way a
-Standard board's does), and reports it as not covered when it doesn't.
-
-Running this file directly (`python app.py`) serves the app via waitress
-(a production-grade WSGI server) by default. Set DEBUG = True in
-config.py to use Flask's own dev server instead (auto-reload +
-interactive debugger) for local development. See README.md
-"Installation" / "Running in production" for details.
+`python app.py` serves via waitress; DEBUG = True in config.py selects
+Flask's development server.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict, namedtuple
 from concurrent.futures import (
     ThreadPoolExecutor,
     wait as futures_wait,
@@ -117,7 +80,7 @@ import chess.chesstb as chesstb
 
 log.info("chess.chesstb backend: noobpwnftw/python-chess (add-chesstb-tablebases)")
 
-# Remote (HTTP) tablebase support, in two flavours -- config.REMOTE_MODE
+# Remote (HTTP) tablebase support, in two flavours - config.REMOTE_MODE
 # picks one (see tablebase_router.open_one):
 #   remote/remote_direct.py   ("direct")   probe in place over byte ranges
 #   remote/remote_fallback.py ("download") whole-file download, disk-cached
@@ -162,7 +125,7 @@ def _validated_int(name: str, value, *, min_val: int = 1, max_val: int | None = 
     if isinstance(value, str):
         # PORT and TRUSTED_PROXY_COUNT are the two config.py settings read
         # as a raw string rather than pre-converted at import time (see
-        # config.py's own comments on each) -- specifically so a bad
+        # config.py's own comments on each) - specifically so a bad
         # value raises here, inside AppConfig.from_config()'s try/except,
         # rather than as an uncaught ValueError from a bare int() call
         # during module import, before this module has an exception handler
@@ -197,10 +160,10 @@ def _validated_str(name: str, value) -> str:
 
 
 def _validated_path_spec(name: str, value) -> str | list[str]:
-    """TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING: a
-    single path (local directory or http(s):// URL) or a list of them for
-    a hybrid source (see tablebase_router.py). Each list entry must
-    itself be a string -- a nested list isn't a valid hybrid source."""
+    """TABLEBASE_PATH: a single path (local directory or http(s):// URL)
+    or a list of them for a hybrid source (see tablebase_router.py). Each
+    list entry must itself be a string - a nested list isn't a valid
+    hybrid source."""
     if isinstance(value, str):
         return value
     if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
@@ -229,17 +192,6 @@ class AppConfig:
     probe_threads:       int
     parallel_threshold:  int
     probe_timeout:       float
-    # <=6-men tablebase, same accepted forms as tablebase_path. Empty
-    # routes every non-castling position -- 7 and 8 men included --
-    # through tablebase_path (see tablebase_router.RoutedTablebase).
-    tablebase_path_7_8:  str | list[str]
-    # Castling-rights-aware tablebase, same accepted forms as
-    # tablebase_path. Independent of piece count: a position with a
-    # still-usable castling right routes here first, regardless of how
-    # many men are on the board. Empty routes such a position through the
-    # same piece-count selection as tablebase_path_7_8 above instead (see
-    # tablebase_router.RoutedTablebase).
-    tablebase_path_castling: str | list[str]
     host:                str
     port:                int
     evaluate_cache_size: int
@@ -247,10 +199,9 @@ class AppConfig:
     block_cache_bytes:   int
     debug:               bool
     waitress_threads:    int
-    # Only used for an http(s):// URL entry in tablebase_path,
-    # tablebase_path_7_8, or tablebase_path_castling (see "ChessTB
-    # backend" above and remote/remote_source.py) -- ignored entirely for
-    # a local-directory entry. Bounds an on-disk LRU of whole downloaded
+    # Only used for an http(s):// URL entry in tablebase_path (see
+    # "ChessTB backend" above and remote/remote_source.py) - ignored
+    # for a local-directory entry. Bounds an on-disk LRU of whole downloaded
     # table files cached by remote/remote_fallback.py (see that file's
     # module docstring for the full design).
     remote_mode:             str
@@ -267,7 +218,7 @@ class AppConfig:
     admin_login_rate_limit:  str
     trusted_proxy_count:     int
     session_cookie_secure:   bool
-    # Hard-coded limit, not one of config.py's settings -- kept as a
+    # Hard-coded limit, not one of config.py's settings - kept as a
     # dataclass field (rather than a bare module constant) so it reads
     # alongside every other request-validation knob above.
     max_fen_length:      int   = 100
@@ -297,9 +248,6 @@ class AppConfig:
             probe_threads=threads,
             parallel_threshold=_validated_int("PROBE_PARALLEL_THRESHOLD", config.PROBE_PARALLEL_THRESHOLD),
             probe_timeout=_validated_float("PROBE_TIMEOUT_SECS", config.PROBE_TIMEOUT_SECS),
-            tablebase_path_7_8=_validated_path_spec("TABLEBASE_PATH_7_8", config.TABLEBASE_PATH_7_8),
-            tablebase_path_castling=_validated_path_spec(
-                "TABLEBASE_PATH_CASTLING", config.TABLEBASE_PATH_CASTLING),
             host=_validated_str("HOST", config.HOST),
             port=_validated_int("PORT", config.PORT, max_val=65535),
             evaluate_cache_size=_validated_int("EVALUATE_CACHE_SIZE", config.EVALUATE_CACHE_SIZE),
@@ -356,34 +304,34 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024   # 4 KB
 
 # secrets.token_hex(32) generated fresh at process startup when
-# FLASK_SECRET_KEY isn't set (see config.py) -- every admin session is then
+# FLASK_SECRET_KEY isn't set (see config.py) - every admin session is then
 # invalidated by a restart, requiring a new login; it never
 # breaks anything the app itself depends on, since sessions here hold
 # nothing but the admin_ok flag set by /admin/login.
 app.secret_key = cfg.secret_key or secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Independent of cfg.debug -- see config.py's SESSION_COOKIE_SECURE for
+# Independent of cfg.debug - see config.py's SESSION_COOKIE_SECURE for
 # why: DEBUG is a development/runtime behavior switch, not a reliable
 # indicator of whether the browser reaches this deployment over HTTPS.
 app.config["SESSION_COOKIE_SECURE"] = cfg.session_cookie_secure
 
-# Without this, request.remote_addr -- and therefore get_remote_address()
-# below, which keys both rate limiters -- is whichever host made the TCP
+# Without this, request.remote_addr - and therefore get_remote_address()
+# below, which keys both rate limiters - is whichever host made the TCP
 # connection to this process. Behind a reverse proxy (Render's own
 # edge/load-balancer in front of the render.yaml deployment this project
 # ships with, or any other reverse proxy placed in front of it) that's the
 # proxy's own address, not the actual client's, so every client sharing
 # that proxy would collapse onto one rate-limit key. ProxyFix instead
 # trusts exactly cfg.trusted_proxy_count X-Forwarded-For hops closest to
-# this app and reads the real client IP from ahead of them -- set to 0
+# this app and reads the real client IP from ahead of them - set to 0
 # this is a no-op, appropriate only for a deployment with no reverse proxy
 # in front of it at all (an untrusted client's own X-Forwarded-For header
 # would otherwise be trusted, letting it spoof its rate-limit key).
 #
 # x_proto does the equivalent correction for X-Forwarded-Proto, which a
 # TLS-terminating reverse proxy sets to tell this app the scheme the
-# client actually connected with -- without it, request.scheme /
+# client connected with - without it, request.scheme /
 # request.is_secure (and any URL this app builds with
 # url_for(..., _external=True)) would read as plain http:// even when the
 # client's own connection was https://, since Flask only ever sees the
@@ -391,11 +339,11 @@ app.config["SESSION_COOKIE_SECURE"] = cfg.session_cookie_secure
 # x_for, for the same reason: a value here that doesn't match the real
 # proxy chain either misreads the scheme or lets a client spoof it.
 #
-# This only actually matters for cfg.debug's Flask-dev-server path below --
+# This only matters for cfg.debug's Flask-dev-server path below:
 # under waitress (cfg.debug False, the production path), waitress parses
 # X-Forwarded-For and corrects REMOTE_ADDR itself before this app ever
-# sees the request, taking priority over -- and making redundant, but
-# harmlessly so -- the correction this makes. See the waitress_serve(...)
+# sees the request, taking priority over - and making redundant, but
+# harmlessly so - the correction this makes. See the waitress_serve(...)
 # call below for that side of it.
 if cfg.trusted_proxy_count > 0:
     app.wsgi_app = ProxyFix(
@@ -409,9 +357,10 @@ def request_too_large(e: Exception) -> tuple:
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
 # Per-IP limits on /probe, /probe/stream (config.py's PROBE_RATE_LIMIT, or
-# PREFETCH_RATE_LIMIT for a request tagged "X-Prefetch: 1" -- see
-# _request_probe_limit below) and, separately, /admin/login (config.py's
-# ADMIN_LOGIN_RATE_LIMIT -- see README.md's "Security notes").
+# PREFETCH_RATE_LIMIT for a request tagged "X-Prefetch: 1" - see
+# _request_probe_limit below) and, separately, /admin/login and /admin
+# requests that carry credentials (config.py's ADMIN_LOGIN_RATE_LIMIT - see
+# README.md's "Security notes").
 # default_limits=[] means nothing is limited except the routes explicitly
 # decorated with @_probe_rate_limit / @_admin_login_rate_limit below; the
 # in-memory storage is per-process, which is enough for a single-container
@@ -426,7 +375,7 @@ limiter = Limiter(
 
 def _request_probe_limit() -> str:
     # X-Prefetch is client-asserted and therefore untrusted as a basis for
-    # relaxing enforcement -- it only ever selects a separate, tighter
+    # relaxing enforcement - it only ever selects a separate, tighter
     # budget than the default, never bypasses PROBE_RATE_LIMIT. A request
     # without the header, or when PREFETCH_RATE_LIMIT is unset, always
     # falls back to the normal probe budget.
@@ -437,12 +386,12 @@ def _request_probe_limit() -> str:
 
 def _probe_rate_limit(view):
     # A plain pass-through when neither limit is configured, rather than
-    # a zero/near-zero limiter.limit() call, so "disabled" actually means
+    # a zero/near-zero limiter.limit() call, so "disabled" means
     # unlimited rather than "limited to approximately nothing." A
     # callable limit_value (rather than the plain string
     # _admin_login_rate_limit below uses) is what lets a single decorator
-    # route a hover-prefetch request to its own, tighter budget -- see
-    # _request_probe_limit above -- flask-limiter re-evaluates it on
+    # route a hover-prefetch request to its own, tighter budget - see
+    # _request_probe_limit above - flask-limiter re-evaluates it on
     # every request rather than once at decoration time.
     if not cfg.probe_rate_limit and not cfg.prefetch_rate_limit:
         return view
@@ -450,13 +399,17 @@ def _probe_rate_limit(view):
 
 
 def _admin_login_rate_limit(view):
-    # Independent of _probe_rate_limit above -- /admin/login is a
+    # Independent of _probe_rate_limit above - /admin/login is a
     # brute-forceable shared-secret check, not a CPU-bound probe, so it
     # gets its own (much tighter) limit rather than reusing or being
-    # covered by PROBE_RATE_LIMIT.
+    # covered by PROBE_RATE_LIMIT. /admin/login and /admin share one budget;
+    # a /admin request without credentials is only a challenge, not a guess.
     if not cfg.admin_login_rate_limit:
         return view
-    return limiter.limit(cfg.admin_login_rate_limit)(view)
+    return limiter.shared_limit(
+        cfg.admin_login_rate_limit, scope="admin_login",
+        exempt_when=lambda: request.method == "GET" and request.authorization is None,
+    )(view)
 
 
 @app.errorhandler(429)
@@ -467,38 +420,25 @@ def rate_limit_exceeded(e: Exception) -> tuple:
 
 
 # ── Tablebase + thread pool ───────────────────────────────────────────────────
-# TABLEBASE_PATH (<=6 men), TABLEBASE_PATH_7_8 (7-8 men), and
-# TABLEBASE_PATH_CASTLING (any castling-rights-bearing position,
-# independent of piece count) are opened independently and combined into
-# one RoutedTablebase, whose upstream-compatible lookup also serves
-# recursive dependency probes. See tablebase_router.py for the routing rules.
+# TABLEBASE_PATH is opened as one ordered source list and wrapped in a
+# SourcedTablebase, whose upstream-compatible lookup also serves recursive
+# dependency probes. See tablebase_router.py for the resolution rules.
 
-def _open_tier(spec, label: str):
-    """Opens one tier via tablebase_router.open_many(), converting any
-    failure to None instead of letting it escape -- so a failure opening
-    one tier (e.g. an unreachable optional TABLEBASE_PATH_7_8 /
-    TABLEBASE_PATH_CASTLING source) can never discard a sibling tier
-    that already opened successfully."""
-    try:
-        return tablebase_router.open_many(
-            spec, label=label, cfg=cfg,
-            remote_source=remote_source, remote_direct=remote_direct,
-            remote_download=remote_fallback,
-        )
-    except Exception as e:
-        log.warning("Failed to open %s: %s", label, e)
-        return None
-
-
-_tb_low = _open_tier(cfg.tablebase_path, "TABLEBASE_PATH")
-_tb_high = _open_tier(cfg.tablebase_path_7_8, "TABLEBASE_PATH_7_8")
-_tb_castling = _open_tier(cfg.tablebase_path_castling, "TABLEBASE_PATH_CASTLING")
-TB = (
-    tablebase_router.RoutedTablebase(
-        low=_tb_low, high=_tb_high, castling=_tb_castling,
-        remote_source=remote_source, block_cache_bytes=cfg.block_cache_bytes,
+try:
+    _tb_source = tablebase_router.open_many(
+        cfg.tablebase_path, label="TABLEBASE_PATH", cfg=cfg,
+        remote_source=remote_source, remote_direct=remote_direct,
+        remote_download=remote_fallback,
     )
-    if (_tb_low or _tb_high or _tb_castling) else None
+except Exception as e:
+    log.warning("Failed to open TABLEBASE_PATH: %s", e)
+    _tb_source = None
+TB = (
+    tablebase_router.SourcedTablebase(
+        _tb_source, remote_source=remote_source,
+        block_cache_bytes=cfg.block_cache_bytes,
+    )
+    if _tb_source is not None else None
 )
 
 _executor = ThreadPoolExecutor(max_workers=cfg.probe_threads, thread_name_prefix="tb_probe")
@@ -550,21 +490,25 @@ def set_security_headers(response: Response) -> Response:
 
 # ── Admin authentication ────────────────────────────────────────────────────
 # Gates /admin and /admin/cache/* behind cfg.admin_token (see config.py's
-# "Admin" section). Two ways to authenticate:
-#   - Browser: POST /admin/login with the token starts a signed session
-#     cookie (see app.secret_key above); subsequent requests from the same
-#     browser are authenticated via that cookie automatically.
-#   - API client: send "Authorization: Bearer <ADMIN_TOKEN>" directly,
+# "Admin" section). Ways to authenticate:
+#   - Browser: GET /admin answers an unauthenticated request with an HTTP
+#     Basic challenge and no page content. The token entered as the
+#     password starts a signed session cookie (see app.secret_key above)
+#     that authenticates the dashboard's own requests to /admin/cache/*.
+#   - API client: POST /admin/login with the token starts the same
+#     session, or send "Authorization: Bearer <ADMIN_TOKEN>" directly,
 #     no session/cookie needed.
 # If cfg.admin_token is empty, every admin route responds 503 rather than
-# running with no password -- there is no "admin panel open to everyone"
+# running with no password - there is no "admin panel open to everyone"
 # fallback.
 
 def _admin_token_matches(candidate: str) -> bool:
-    # hmac.compare_digest for constant-time comparison -- a plain `==`
+    # hmac.compare_digest for constant-time comparison - a plain `==`
     # would leak the token's length/prefix through response-timing
-    # differences to an attacker making repeated guesses.
-    return bool(cfg.admin_token) and hmac.compare_digest(candidate, cfg.admin_token)
+    # differences to an attacker making repeated guesses. Compared as bytes
+    # because compare_digest rejects a non-ASCII str.
+    return bool(cfg.admin_token) and hmac.compare_digest(
+        candidate.encode("utf-8"), cfg.admin_token.encode("utf-8"))
 
 
 def _is_admin_authenticated() -> bool:
@@ -604,6 +548,19 @@ def _normalize_fen(fen: str) -> str:
 # ── Sort helpers ──────────────────────────────────────────────────────────────
 
 _OUTCOME_RANK: dict[int, int] = {2: 0, 1: 1, 0: 2, -1: 3, -2: 4}
+_PROMOTION_RANK = {"Q": 0, "R": 1, "B": 2, "N": 3}
+
+
+def _move_tiebreak(san: str) -> tuple[int, str, int, str]:
+    """Last sort-key component: immediate mate first, then SAN order with
+    promotions ranked Q, R, B, N. It applies only after outcome, DTC order,
+    and distance, so a better underpromotion still outranks a worse queen
+    promotion."""
+    mate_rank = 0 if san.endswith("#") else 1
+    prefix, separator, promotion = san.partition("=")
+    if separator:
+        return mate_rank, prefix, _PROMOTION_RANK[promotion[0]], promotion[1:]
+    return mate_rank, san, 0, ""
 
 
 def _outcome_rank(wdl_val: int) -> int:
@@ -675,17 +632,15 @@ def _is_cursed_exit(parent: chess.Board, child: chess.Board, child_wdl: int) -> 
 
 def _capped_wdl(move_wdl: int, root_wdl: int) -> int:
     """move_wdl capped at root_wdl: a move can never be better than the root
-    position's own optimal value (see _effective_move_wdl). Used to bucket a
-    move's outcome from WDL alone for the response's summary counts - WDL is
-    the only metric every probeable move has, independent of which of
-    DTZ/DTC/DTM/DTM50 this material's tables happen to cover."""
+    position's own optimal value (see _effective_move_wdl). Used by the
+    clock-independent DTZ and DTM columns."""
     return root_wdl if move_wdl > root_wdl else move_wdl
 
 
 # ── Variant ────────────────────────────────────────────────────────────────
 #
 # "standard" | "chess960". Chess960 changes only the interpretation of
-# castling rights/moves -- board geometry, piece movement, and tablebase
+# castling rights/moves - board geometry, piece movement, and tablebase
 # material selection are unaffected (see tablebase_router.py, unchanged by
 # variant). The two rulesets are never inferred from a FEN's contents: the
 # orthodox starting array is itself one of the 960 legal Chess960 starting
@@ -709,7 +664,7 @@ def _build_board(variant: str, fen: str) -> chess.Board:
     """The single place a chess.Board is constructed from a request- or
     move-generation-supplied FEN string. chess960=True changes only how
     the fork parses/serializes the castling field and how it represents
-    castling moves -- everything else about the resulting Board (piece
+    castling moves - everything else about the resulting Board (piece
     movement, check/mate detection, piece_map, etc.) behaves identically
     to the variant="standard" path."""
     return chess.Board(fen, chess960=(variant == "chess960"))
@@ -767,10 +722,10 @@ def _validate_fen_parts(variant: str, parts: list[str]) -> str | None:
 # ── Signed-value helpers ──────────────────────────────────────────────────────
 #
 # WIN/CURSED_WIN/DRAW/BLESSED_LOSS/LOSE -> +2/+1/0/-1/-2, matching
-# chess.syzygy's convention -- built from chess.chesstb's public class
+# chess.syzygy's convention - built from chess.chesstb's public class
 # constants rather than its private _WDL_SIGNED, since this app has no
 # reason to depend on a leading-underscore upstream symbol for a five-entry
-# map it can just as easily own. This is what _probe_board below builds its
+# map it can as easily own. This is what _probe_board below builds its
 # signed wdl/dtc_wdl/dtm50_wdl fields on.
 
 _SIGNED_WDL: dict[int, int] = {
@@ -826,10 +781,10 @@ _inflight: dict[tuple[str, str], _InFlightProbe] = {}   # (variant, fen) -> slot
 
 # Set (per calling thread) by _probe_fen_with_deadline below, so
 # _probe_fen_deduped's in-flight wait can use a request's own remaining
-# deadline instead of a fresh cfg.probe_timeout -- see that function's
+# deadline instead of a fresh cfg.probe_timeout - see that function's
 # docstring for why a plain module-level value wouldn't work here. .board
 # is set the same way, for the same reason, when the caller already has a
-# chess.Board built from this exact fen in scope -- see
+# chess.Board built from this exact fen in scope - see
 # _probe_fen_with_deadline's board parameter.
 _probe_tls = threading.local()
 
@@ -847,23 +802,28 @@ def _probe_fen_deduped(variant: str, fen: str) -> chesstb.ProbeResult | None:
 
     A non-owner's wait is bounded by the calling thread's own remaining
     deadline (see _probe_fen_with_deadline) so one hung probe can't pin a
-    waiter beyond its own request's budget -- falling back to a fresh
+    waiter beyond its own request's budget - falling back to a fresh
     cfg.probe_timeout when no deadline was set, for a caller reached
     outside a deadline-aware path. The wait expiring raises, which reads
-    downstream as a retryable failure just like the probe itself timing out.
+    downstream as a retryable failure like the probe itself timing out.
+    A deadline that has already passed raises before any work is started or
+    joined.
 
     The owner builds the chess.Board to probe from (variant, fen) itself
     unless the calling thread already left one in _probe_tls.board (see
-    _probe_fen_with_deadline's board parameter) -- for a root-fen probe,
+    _probe_fen_with_deadline's board parameter) - for a root-fen probe,
     the caller has usually already built one anyway (to validate the FEN,
     render the board, etc.), and re-parsing the same string a second time
     here is pure waste. variant is required even when board is supplied,
-    since it is also this function's in-flight/dedup key -- the same FEN
+    since it is also this function's in-flight/dedup key - the same FEN
     text probes to a different (and possibly incompatible) result under
     Standard vs Chess960 rules (see the module-level variant comment), so
     a key of fen alone would let one variant's probe be served to the
     other's caller.
     """
+    deadline = getattr(_probe_tls, "deadline", None)
+    if deadline is not None and time.monotonic() >= deadline:
+        raise ProbeInFlightTimeout("Probe deadline expired before work started")
     key = (variant, fen)
     with _inflight_lock:
         slot = _inflight.get(key)
@@ -874,7 +834,6 @@ def _probe_fen_deduped(variant: str, fen: str) -> chesstb.ProbeResult | None:
             owner = False
 
     if not owner:
-        deadline = getattr(_probe_tls, "deadline", None)
         timeout = (deadline - time.monotonic()) if deadline is not None else cfg.probe_timeout
         if timeout <= 0 or not slot.done.wait(max(0, timeout)):
             raise ProbeInFlightTimeout(f"Timed out waiting on an in-flight probe of variant={variant} {fen}")
@@ -909,28 +868,28 @@ def _probe_fen_with_deadline(
     optionally, `board`) visible to _probe_fen_deduped's in-flight wait /
     owner branch on this thread.
 
-    _probe_fen must stay a (variant, fen)-only lru_cache -- adding deadline
+    _probe_fen must stay a (variant, fen)-only lru_cache - adding deadline
     as a real parameter would make it part of the cache key, and since a
     deadline is different on every call, that would turn the cache into a
     permanent miss. A plain thread-local set by the caller doesn't work
     either when this runs via _executor.submit(_probe_fen_with_deadline,
     variant, fen, ...): submit() runs the call on a pool worker thread, not
     the submitting thread, so a thread-local the submitter set wouldn't be
-    visible there. Passing deadline as a real argument to this wrapper --
-    called either directly or as the submitted callable itself -- sidesteps
+    visible there. Passing deadline as a real argument to this wrapper,
+    called either directly or as the submitted callable itself, sidesteps
     both problems: it's a normal argument up to here, then becomes this
     worker thread's own thread-local for the duration of the call.
 
     board is optional and exists purely to avoid re-parsing a FEN this
-    thread already has a chess.Board for -- pass it only when `board` was
+    thread already has a chess.Board for - pass it only when `board` was
     itself built from this exact (variant, fen) pair, right here, in this
     same function call's caller, moments before this call. _probe_fen_deduped
-    has no way to verify the two actually match (board.fen() isn't
+    has no way to verify the two match (board.fen() isn't
     reliably equal to a shortened/unpadded input fen string, so comparing
     them isn't a safety net either), so passing a board that doesn't
     correspond to (variant, fen) silently returns a wrong probe result.
     Never pass this for a child fen, which is only ever known as a string,
-    not as a board this thread built -- leave it at the default None there.
+    not as a board this thread built - leave it at the default None there.
     """
     _probe_tls.deadline = deadline
     _probe_tls.board = board
@@ -1018,7 +977,7 @@ def evaluate_all_moves(
     by dtz_anchor.resolve().
 
     variant applies to every child position probed below, matching the
-    ruleset `board` itself was built under (see _build_board) -- board.push()/
+    ruleset `board` itself was built under (see _build_board) - board.push()/
     pop() inside _collect_move_info already preserves board.chess960 for
     move generation and child.fen() serialization for free, since it's the
     same Board object throughout; variant only needs to be threaded through
@@ -1070,6 +1029,7 @@ def evaluate_all_moves(
                     probe_cache[fen] = None
                     transient_failures.add(fen)
             else:
+                fut.cancel()  # Drops queued work; a running probe still warms the cache.
                 log.warning("Probe timed out for variant=%s %s", variant, fen)
                 probe_cache[fen] = None
                 transient_failures.add(fen)
@@ -1093,9 +1053,9 @@ def evaluate_all_moves(
     dtm50_rows: list[tuple] = []
 
     # Outcome per move for the response's summary counts (see
-    # _evaluate_fen_impl) - WDL alone, independent of which of
-    # DTZ/DTC/DTM/DTM50 this material's tables actually cover, since any one
-    # of those columns can end up entirely "not_available" below.
+    # _evaluate_fen_impl). Each outcome respects the child's halfmove clock:
+    # DTM50 and DTC already resolve the 50-move rule, and clock-independent
+    # WDL cannot establish a win or loss when both are unavailable.
     move_outcomes: list[str] = []
 
     # Sort key/entry pair for a move whose own metric table doesn't cover
@@ -1106,7 +1066,8 @@ def evaluate_all_moves(
         san: str, child_fen: str | None, move_is_mate: bool,
         draw_reason: str | None, has_order: bool = False,
     ) -> tuple[tuple, MoveEntry]:
-        key = (_outcome_rank(0) + 10, 0, 0, san) if has_order else (_outcome_rank(0) + 10, 0, san)
+        tiebreak = _move_tiebreak(san)
+        key = (_outcome_rank(0) + 10, 0, 0, tiebreak) if has_order else (_outcome_rank(0) + 10, 0, tiebreak)
         entry: MoveEntry = {
             "san": san, "plies": 0, "order": 0, "is_mate": move_is_mate, "available": False,
             "outcome": "not_available", "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1118,7 +1079,7 @@ def evaluate_all_moves(
         child_fen: str | None, draw_reason: str | None,
     ) -> tuple[tuple, DtzMoveEntry, int]:
         eff_wdl = _effective_move_wdl(my_wdl, root_wdl, eff_dtz)
-        key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtz), san)
+        key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtz), _move_tiebreak(san))
         entry: DtzMoveEntry = {
             "san": san, "plies": abs(eff_dtz), "order": 0, "is_mate": move_is_mate, "available": True,
             "outcome": _outcome_label(eff_wdl), "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1151,8 +1112,8 @@ def evaluate_all_moves(
                     "san": san, "plies": 0, "order": 0, "is_mate": False, "available": False,
                     "outcome": "unknown", "child_fen": child_fen, "draw_reason": None,
                 }
-                stub_key = (_outcome_rank(0) + 10, 0, san)
-                dtc_stub_key = (_outcome_rank(0) + 10, 0, 0, san)
+                stub_key = (_outcome_rank(0) + 10, 0, _move_tiebreak(san))
+                dtc_stub_key = (_outcome_rank(0) + 10, 0, 0, _move_tiebreak(san))
                 dtz_rows.append((stub_key, stub))
                 dtc_rows.append((dtc_stub_key, stub))
                 dtm_rows.append((stub_key, stub))
@@ -1172,7 +1133,19 @@ def evaluate_all_moves(
             opp_dtm50 = probe_result.dtm50
 
         my_wdl = -opp_wdl
-        move_outcomes.append(_outcome_label(_capped_wdl(my_wdl, root_wdl)))
+        if opp_has_dtm50:
+            summary_wdl = -opp_dtm50_wdl
+        elif opp_has_dtc:
+            summary_wdl = -opp_dtc_wdl
+        else:
+            # Draws, cursed wins, and blessed losses are draws under the
+            # rule; a win or loss needs DTM50 or DTC to resolve the clock.
+            summary_wdl = 0 if abs(my_wdl) <= 1 else None
+        move_outcomes.append(
+            "win" if summary_wdl == 2 else
+            "loss" if summary_wdl == -2 else
+            "unknown" if summary_wdl is None else "draw"
+        )
 
         # DTZ row.
         if opp_has_dtz:
@@ -1192,7 +1165,12 @@ def evaluate_all_moves(
             if move_is_zeroing:
                 eff_dtz = _effective_distance(my_wdl, 0)
             elif cursed_exit:
-                eff_dtz = _apply_sign(option.value[0], my_wdl)
+                # A rounded derived child can be even, so its true exit
+                # distances span y+1..y+3. Reporting y+2 keeps the displayed
+                # error within one ply; option.value keeps the possible
+                # distances for the anchor.
+                exit_dtz = opp_dtz + 2 if opp_dtz_rounded else option.value[0]
+                eff_dtz = _apply_sign(exit_dtz, my_wdl)
             else:
                 eff_dtz = _effective_distance(my_wdl, my_dtz)
             dtz_key, dtz_entry, eff_wdl = _dtz_row(
@@ -1259,8 +1237,8 @@ def evaluate_all_moves(
                 eff_dtc = _effective_distance(my_dtc_wdl, my_dtc)
             # A draw has nothing owed regardless of the raw push count
             # above - e.g. a defensive push into a dead draw (stalemate,
-            # insufficient material, or a budget that no longer fits the
-            # clock) must not report a nonzero push count just because it
+            # insufficient material, or a budget that exceeds the
+            # clock) must not report a nonzero push count solely because it
             # happened to be a push; _order_rank sorts it correctly either
             # way (it treats wdl_val == 0 as rank 0 regardless), but the
             # value shown to the client should read 0 like plies does.
@@ -1269,7 +1247,7 @@ def evaluate_all_moves(
                 _outcome_rank(my_dtc_wdl),
                 _order_rank(my_dtc_wdl, eff_order),
                 _ply_rank(my_dtc_wdl, eff_dtc),
-                san,
+                _move_tiebreak(san),
             )
             dtc_rows.append((dtc_key, {
                 "san": san, "plies": abs(eff_dtc), "order": eff_order, "is_mate": move_is_mate,
@@ -1288,12 +1266,13 @@ def evaluate_all_moves(
                 # loss) bucket and label as the DTZ row above, since that
                 # status is a single fact about eff_dtz and root_wdl rather
                 # than a separate one per metric.
-                dtm_key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtm), san)
+                dtm_key = (_outcome_rank(eff_wdl), _ply_rank(eff_wdl, eff_dtm), _move_tiebreak(san))
                 dtm_outcome = outcome
             else:
                 # Without DTZ the bucket comes from WDL alone.
                 dtm_eff_wdl = _capped_wdl(my_wdl, root_wdl)
-                dtm_key = (_outcome_rank(dtm_eff_wdl), _ply_rank(dtm_eff_wdl, eff_dtm), san)
+                dtm_key = (_outcome_rank(dtm_eff_wdl), _ply_rank(dtm_eff_wdl, eff_dtm),
+                           _move_tiebreak(san))
                 dtm_outcome = _outcome_label(dtm_eff_wdl)
             dtm_rows.append((dtm_key, {
                 "san": san, "plies": abs(eff_dtm), "order": 0, "is_mate": move_is_mate, "available": True,
@@ -1307,7 +1286,8 @@ def evaluate_all_moves(
             my_dtm50_wdl = -opp_dtm50_wdl
             my_dtm50 = _apply_sign(opp_dtm50, my_dtm50_wdl)
             eff_dtm50 = _effective_distance(my_dtm50_wdl, my_dtm50)
-            dtm50_key = (_outcome_rank(my_dtm50_wdl), _ply_rank(my_dtm50_wdl, eff_dtm50), san)
+            dtm50_key = (_outcome_rank(my_dtm50_wdl), _ply_rank(my_dtm50_wdl, eff_dtm50),
+                         _move_tiebreak(san))
             dtm50_rows.append((dtm50_key, {
                 "san": san, "plies": abs(eff_dtm50), "order": 0, "is_mate": move_is_mate, "available": True,
                 "outcome": _outcome_label(my_dtm50_wdl), "child_fen": child_fen, "draw_reason": draw_reason,
@@ -1339,9 +1319,9 @@ def evaluate_all_moves(
     dtm50_rows.sort(key=lambda r: r[0])
 
     summary = {
-        "wins":    sum(1 for o in move_outcomes if o in ("win", "cursed_win")),
+        "wins":    sum(1 for o in move_outcomes if o == "win"),
         "draws":   sum(1 for o in move_outcomes if o == "draw"),
-        "losses":  sum(1 for o in move_outcomes if o in ("loss", "blessed_loss")),
+        "losses":  sum(1 for o in move_outcomes if o == "loss"),
         "unknown": sum(1 for o in move_outcomes if o == "unknown"),
     }
 
@@ -1370,16 +1350,15 @@ def _validate_and_build_board(variant: str, fen: str) -> chess.Board:
     FEN/board problem - callers are expected to catch and format those.
 
     Legality (castling rights matching an actual king/rook pair, no pawns
-    on the back rank, exactly one king per side, etc.) is entirely
-    delegated to board.is_valid() for both variants -- this function adds
+    on the back rank, exactly one king per side, etc.) is
+    delegated to board.is_valid() for both variants - this function adds
     no Standard-only assumptions of its own (e.g. requiring castling rooks
     on a1/h1/a8/h8) that would misclassify a legal Chess960 position as
     invalid. See _build_board for how the variant affects construction.
     """
     if TB is None:
         raise RuntimeError(
-            "Tablebase not initialised. Check TABLEBASE_PATH / TABLEBASE_PATH_7_8 / "
-            "TABLEBASE_PATH_CASTLING.")
+            "Tablebase not initialised. Check TABLEBASE_PATH.")
 
     parts = fen.split()
     fmt_error = _validate_fen_parts(variant, parts)
@@ -1435,16 +1414,16 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
     """
     Probes the tablebase for a root FEN and returns a pre-serialized JSON string.
     Routes the root probe through the same shared _probe_fen cache used for
-    child positions, so a position that was just probed as a child (e.g. the
-    position the user just moved into) is served from cache instead of
+    child positions, so a position that was probed as a child (e.g. the
+    position the user moved into) is served from cache instead of
     re-hitting the tablebase.
 
-    (variant, fen) are the only arguments (required for @lru_cache to key on
-    them), so a caller that already built a board/move_info for this exact
-    pair -- e.g. probe_stream()'s SSE handler, which needs both up front
-    anyway to size its progress bar -- hands them over via _evaluate_tls
+    (variant, fen) are the only arguments, as they are evaluate_fen()'s cache
+    key, so a caller that already built a board/move_info for this exact
+    pair - e.g. probe_stream()'s SSE handler, which needs both up front
+    anyway to size its progress bar - hands them over via _evaluate_tls
     instead, letting this call skip redoing that work. Ignored on a cache
-    hit, since the function body below never runs in that case.
+    hit, since evaluate_fen() returns before calling this function.
 
     Raises _IncompleteResult (carrying the same JSON) when a move came back
     unknown for a retryable reason, so evaluate_fen() can serve it without
@@ -1484,7 +1463,7 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
         })
 
     # Route the root probe through the shared child-probe cache. board was
-    # either handed over via _evaluate_tls or just built above from this
+    # either handed over via _evaluate_tls or built above from this
     # exact fen, so it's passed through here too rather than making
     # _probe_fen_deduped re-parse the same string a second time.
     root = _probe_fen_with_deadline(variant, fen, root_deadline, board)
@@ -1492,7 +1471,7 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
         raise chesstb.MissingTableError(f"Position not in tablebase: variant={variant} {fen}")
 
     bypass_parallel = getattr(_evaluate_tls, "bypass_parallel", False)
-    # Own fresh budget, not the remainder of root_deadline -- see the
+    # Own fresh budget, not the remainder of root_deadline - see the
     # comment above root_deadline.
     child_deadline = time.monotonic() + cfg.probe_timeout
     moves_dtz, moves_dtc, moves_dtm, moves_dtm50, complete, summary, resolved_dtz = evaluate_all_moves(
@@ -1540,25 +1519,64 @@ def _evaluate_fen_impl(variant: str, fen: str) -> str:
     return json_str
 
 
-# The cache lives on the inner function only: lru_cache never stores the result
-# of a call that raised, so an _IncompleteResult passes straight through to the
-# caller without being memoized, and the next request for that (variant, fen)
-# re-probes. By then the timed-out probes have usually landed in _probe_fen's
-# own cache, so the retry is both cheap and likely to resolve.
-@lru_cache(maxsize=cfg.evaluate_cache_size)
-def _evaluate_fen_cached(variant: str, fen: str) -> str:
-    return _evaluate_fen_impl(variant, fen)
+# Completed responses live in an explicit LRU so probe_stream() can serve one
+# before building a board, walking legal moves or queuing child probes. An
+# _IncompleteResult is returned without being stored, so the next request for
+# that (variant, fen) re-probes; by then the timed-out probes have usually
+# landed in _probe_fen's own cache, so the retry is cheap and likely to
+# resolve. Evaluation runs outside the lock.
+_evaluation_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+_evaluation_cache_lock = threading.Lock()
+_evaluation_hits = _evaluation_misses = 0
+_EvaluationCacheInfo = namedtuple("CacheInfo", "hits misses maxsize currsize")
+
+
+def _cached_evaluation(variant: str, fen: str, *, count_miss: bool = True) -> str | None:
+    global _evaluation_hits, _evaluation_misses
+    with _evaluation_cache_lock:
+        key = (variant, fen)
+        result = _evaluation_cache.get(key)
+        if result is not None:
+            _evaluation_cache.move_to_end(key)
+            _evaluation_hits += 1
+        elif count_miss:
+            _evaluation_misses += 1
+        return result
 
 
 def evaluate_fen(variant: str, fen: str) -> str:
+    cached = _cached_evaluation(variant, fen)
+    if cached is not None:
+        return cached
     try:
-        return _evaluate_fen_cached(variant, fen)
+        result = _evaluate_fen_impl(variant, fen)
     except _IncompleteResult as incomplete:
         return incomplete.json_str
+    with _evaluation_cache_lock:
+        key = (variant, fen)
+        _evaluation_cache[key] = result
+        _evaluation_cache.move_to_end(key)
+        while len(_evaluation_cache) > cfg.evaluate_cache_size:
+            _evaluation_cache.popitem(last=False)
+    return result
 
 
-evaluate_fen.cache_clear = _evaluate_fen_cached.cache_clear  # type: ignore[attr-defined]
-evaluate_fen.cache_info  = _evaluate_fen_cached.cache_info   # type: ignore[attr-defined]
+def _clear_evaluation_cache() -> None:
+    global _evaluation_hits, _evaluation_misses
+    with _evaluation_cache_lock:
+        _evaluation_cache.clear()
+        _evaluation_hits = _evaluation_misses = 0
+
+
+def _evaluation_cache_info():
+    with _evaluation_cache_lock:
+        return _EvaluationCacheInfo(
+            _evaluation_hits, _evaluation_misses, cfg.evaluate_cache_size, len(_evaluation_cache),
+        )
+
+
+evaluate_fen.cache_clear = _clear_evaluation_cache  # type: ignore[attr-defined]
+evaluate_fen.cache_info  = _evaluation_cache_info   # type: ignore[attr-defined]
 
 
 # ── Common (variant, FEN) extraction + validation helper ──────────────────────
@@ -1611,9 +1629,8 @@ def probe() -> Response | tuple[Response, int]:
         return jsonify(_missing_table_error_payload(variant, fen)), 400
 
     except RuntimeError as e:
-        # Tablebase not initialised (TABLEBASE_PATH, TABLEBASE_PATH_7_8,
-        # and TABLEBASE_PATH_CASTLING all unset, or all failed to load) --
-        # same condition and status code as /health's own "degraded"
+        # Tablebase not initialised (TABLEBASE_PATH unset or failed to
+        # load) - same condition and status code as /health's own "degraded"
         # response for this, and the same message _validate_and_build_board
         # raises for /probe/stream to report over SSE.
         return jsonify({"error": str(e)}), 503
@@ -1676,6 +1693,11 @@ def probe_stream() -> Response | tuple[Response, int]:
         return f"data: {json.dumps(obj)}\n\n"
 
     def generate():
+        # A complete cached response needs no board, move walk or child probes.
+        cached = _cached_evaluation(variant, fen, count_miss=False)
+        if cached is not None:
+            yield 'data: {"status":"done",' + cached[1:] + '\n\n'
+            return
         # Validated up front (rather than only inside evaluate_fen below) so
         # the validation error can be reported immediately over SSE instead of
         # only finding out after pre-warming child positions. Uses the same
@@ -1704,10 +1726,10 @@ def probe_stream() -> Response | tuple[Response, int]:
         )
         if not terminal:
             try:
-                # root_board was just built above from this exact (variant,
+                # root_board was built above from this exact (variant,
                 # fen), so it's passed through here too rather than making
                 # _probe_fen_deduped re-parse the same string a second
-                # time -- see _probe_fen_with_deadline's board parameter.
+                # time - see _probe_fen_with_deadline's board parameter.
                 root_probe = _probe_fen_with_deadline(
                     variant, fen, time.monotonic() + cfg.probe_timeout, root_board,
                 )
@@ -1738,7 +1760,7 @@ def probe_stream() -> Response | tuple[Response, int]:
         # only governs evaluate_all_moves' own sequential/parallel choice below):
         # a bare sequential loop here would have no way to bound a single hung
         # _probe_fen_with_deadline() call, since there'd be no worker thread to
-        # poll against; only a background thread lets this deadline actually
+        # poll against; only a background thread lets this deadline
         # cut the wait short. This budget is independent of the root probe's
         # own, above - a slow root probe doesn't eat into pre-warm's time.
         deadline = time.monotonic() + cfg.probe_timeout
@@ -1751,20 +1773,36 @@ def probe_stream() -> Response | tuple[Response, int]:
         remaining = set(futures.values())
         done_count = 0
         prewarm_complete = True
-        while done_count < total:
-            time_left = deadline - time.monotonic()
-            if time_left <= 0:
-                log.warning(
-                    "Probe pre-warm timed out for variant=%s %s (%d/%d child positions still pending)",
-                    variant, fen, total - done_count, total,
+        last_event = time.monotonic()
+        try:
+            while done_count < total:
+                time_left = deadline - time.monotonic()
+                if time_left <= 0:
+                    log.warning(
+                        "Probe pre-warm timed out for variant=%s %s (%d/%d child positions still pending)",
+                        variant, fen, total - done_count, total,
+                    )
+                    prewarm_complete = False
+                    break
+                newly_done, remaining = futures_wait(
+                    remaining, timeout=min(0.3, time_left), return_when=FIRST_COMPLETED
                 )
-                prewarm_complete = False
-                break
-            newly_done, remaining = futures_wait(
-                remaining, timeout=min(0.3, time_left), return_when=FIRST_COMPLETED
-            )
-            done_count += len(newly_done)
-            yield _sse({"status": "probing", "completed": done_count, "total": total})
+                if any(f.cancelled() or f.exception() is not None for f in newly_done):
+                    prewarm_complete = False
+                if newly_done:
+                    done_count += len(newly_done)
+                    yield _sse({"status": "probing", "completed": done_count, "total": total})
+                    last_event = time.monotonic()
+                elif time.monotonic() - last_event >= 1.0:
+                    # An SSE comment keeps the stream live and surfaces a client
+                    # disconnect; the browser ignores it.
+                    yield ": keep-alive\n\n"
+                    last_event = time.monotonic()
+        finally:
+            # Also runs when the client disconnects. A running probe finishes
+            # and warms the cache; queued work is dropped.
+            for future in remaining:
+                future.cancel()
 
         # If pre-warming above finished, every child FEN is already cached, so
         # evaluate_fen() below can fetch them all as cache hits sequentially,
@@ -1824,15 +1862,12 @@ def clear_cache() -> Response:
     evaluate_fen.cache_clear()
     _probe_fen.cache_clear()
     # The two LRUs above are app.py-level caches keyed on (variant, FEN)
-    # pairs. They are not the only cache in the probing pipeline: each tier's
-    # underlying tablebase can keep its own internal decoded-block cache
-    # and, in remote mode, a downloaded-file cache (remote/remote_fallback.py).
-    # RoutedTablebase.clear_caches()/cache_stats() are exposed on TB
-    # itself, but only actually clear/report something for a tier backed
-    # by a remote/remote_fallback.py Tablebase -- a plain local-directory
-    # Tablebase has no such cache. cache_stats() coming back empty is what
-    # distinguishes "nothing to clear" from "cleared something", since
-    # every tier is asked unconditionally either way.
+    # pairs. They are not the only cache in the probing pipeline: the
+    # tablebase keeps its own decoded-block cache and, in remote mode, a
+    # downloaded-file cache (remote/remote_fallback.py).
+    # SourcedTablebase.clear_caches()/cache_stats() are exposed on TB
+    # itself and cover both, so cache_stats() coming back empty means no
+    # tablebase is loaded.
     tb_cache_info: dict = {}
     if TB is not None:
         TB.clear_caches()
@@ -1872,15 +1907,12 @@ def cache_stats() -> Response:
             "block_cache_bytes":   cfg.block_cache_bytes,
         },
         "tablebase": {
-            "low_configured":       TB.low is not None if TB is not None else False,
-            "high_configured":      TB.high is not None if TB is not None else False,
-            "castling_configured":  TB.castling is not None if TB is not None else False,
+            "configured": TB is not None,
         },
     }
-    # RoutedTablebase.cache_stats() is exposed on TB and reports the configured tiers
-    # -- a tier contributes no key when it has no remote-backed cache to
-    # report (see clear_cache() above for why a plain local-directory
-    # Tablebase has none).
+    # SourcedTablebase.cache_stats() is exposed on TB and reports the block
+    # cache plus the source's own caches - a plain local-directory
+    # Tablebase has none (see clear_cache() above).
     if TB is not None:
         tb_cache = TB.cache_stats()
         if tb_cache:
@@ -1908,24 +1940,29 @@ def admin_logout() -> Response:
 
 
 @app.route("/admin", methods=["GET"])
-def admin_dashboard() -> str | tuple[str, int]:
-    # Renders the dashboard once authenticated (session cookie from
-    # /admin/login); a login form otherwise. Unlike /admin/cache/* below,
-    # this route can't just use _require_admin -- a browser visiting /admin
-    # needs the login form itself, not a bare 401/503 JSON body. Matches
-    # /admin/login and /admin/cache/*'s own 503 when ADMIN_TOKEN is unset,
-    # rather than serving the dashboard shell with a 200.
+@_admin_login_rate_limit
+def admin_dashboard() -> str | tuple[Response, int]:
+    # Renders the dashboard only for an authenticated client; any other
+    # client gets a JSON error and no page content. Unlike /admin/cache/*,
+    # this route can't use _require_admin - a browser needs the HTTP Basic
+    # challenge to be prompted for the token. Basic credentials are
+    # accepted here only: a browser attaches cached Basic credentials to
+    # any request to this origin, so accepting them on /admin/cache/clear
+    # would expose it to cross-site requests, unlike the SameSite=Lax
+    # session cookie that a successful Basic request starts.
     if not cfg.admin_token:
-        return render_template(
-            "admin.html", authenticated=False, admin_configured=False,
-            github_url=cfg.github_url,
-        ), 503
-    return render_template(
-        "admin.html",
-        authenticated=_is_admin_authenticated(),
-        admin_configured=True,
-        github_url=cfg.github_url,
-    )
+        return jsonify({
+            "error": "Admin panel disabled: ADMIN_TOKEN is not configured.",
+        }), 503
+    if not _is_admin_authenticated():
+        credentials = request.authorization
+        if (credentials is None or credentials.type != "basic"
+                or not _admin_token_matches(credentials.password or "")):
+            response = jsonify({"error": "Admin authentication required."})
+            response.headers["WWW-Authenticate"] = 'Basic realm="ChessTB Admin", charset="UTF-8"'
+            return response, 401
+        session["admin_ok"] = True
+    return render_template("admin.html", github_url=cfg.github_url)
 
 
 # ── OpenAPI specification ─────────────────────────────────────────────────────
@@ -1959,18 +1996,18 @@ if __name__ == "__main__":
         # trusted_proxy=* / trusted_proxy_count / trusted_proxy_headers:
         # waitress parses X-Forwarded-For and X-Forwarded-Proto and
         # rewrites REMOTE_ADDR / wsgi.url_scheme itself, before the
-        # request ever reaches the Flask app object -- so it sits in front
+        # request ever reaches the Flask app object - so it sits in front
         # of, and takes priority over, the ProxyFix layer wired onto
         # app.wsgi_app above. Without this, waitress's default
-        # (trusted_proxy=None) strips both headers entirely as untrusted,
-        # silently discarding them before ProxyFix could ever see them --
+        # (trusted_proxy=None) strips both headers as untrusted,
+        # silently discarding them before ProxyFix could ever see them;
         # ProxyFix alone is not sufficient here. `"*"` trusts whichever
         # peer connects, rather than one specific IP, because Render's
         # edge/load-balancer's own address isn't a fixed, documented
         # value; this is safe under the same assumption
-        # TRUSTED_PROXY_COUNT's docstring already states -- that nothing
+        # TRUSTED_PROXY_COUNT's docstring already states - that nothing
         # but that one proxy hop can reach this process directly. Skipped
-        # entirely when cfg.trusted_proxy_count is 0 (no reverse proxy in
+        # when cfg.trusted_proxy_count is 0 (no reverse proxy in
         # front at all), leaving waitress's own default in place.
         log.info(
             "Starting waitress production server on %s:%s (threads=%s)",

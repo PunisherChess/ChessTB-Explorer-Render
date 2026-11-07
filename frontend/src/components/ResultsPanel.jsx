@@ -1,20 +1,22 @@
-import { useEffect, useRef } from 'react';
+/** ResultsPanel.jsx: ranked move tables for DTZ, DTC, DTM, and DTM50 */
+
+import { memo, useEffect, useRef } from 'react';
 import { Tablebase } from '../engine/tablebase.js';
+import { METRICS } from '../engine/constants.js';
 import { initMovesGutterSync } from '../engine/scroll.js';
 import Button from './ui/Button.jsx';
 import Panel from './ui/Panel.jsx';
 import Segmented from './ui/Segmented.jsx';
 
-const METRICS = ['dtz', 'dtc', 'dtm', 'dtm50'];
-const METRIC_LABEL = { dtz: 'DTZ', dtc: 'DTC', dtm: 'DTM', dtm50: 'DTM50' };
-const METRIC_OPTIONS = METRICS.map(m => ({ value: m, label: METRIC_LABEL[m] }));
+const METRIC_IDS = Object.keys(METRICS);
+const METRIC_OPTIONS = METRIC_IDS.map(m => ({ value: m, label: METRICS[m].label }));
+
+// Header text of each metric's score column (default 'Score').
+const SCORE_HEADER = { dtc: 'Score/Order' };
 
 const COLUMN_CLASSES = [
     'col-rank',
-    'group-dtz col-move', 'group-dtz col-score',
-    'group-dtc col-move', 'group-dtc col-score',
-    'group-dtm col-move', 'group-dtm col-score',
-    'group-dtm50 col-move', 'group-dtm50 col-score',
+    ...METRIC_IDS.flatMap(m => [`group-${m} col-move`, `group-${m} col-score`]),
 ];
 
 function MetricColGroup() {
@@ -35,8 +37,8 @@ function DotIcon({ prefix }) {
     );
 }
 
-function Cell({ cell, idx }) {
-    const props = { key: idx, className: cell.className };
+function Cell({ cell }) {
+    const props = { className: cell.className };
     if (cell.title) props.title = cell.title;
     if (cell.headers) props.headers = cell.headers;
     if (cell.interactive) {
@@ -59,15 +61,15 @@ function Cell({ cell, idx }) {
     return <td {...props}>{cell.text}</td>;
 }
 
-function AutoplayButton({ metric, explorer }) {
-    const { autoplayMetric, autoplayAvailability, actions } = explorer;
+function AutoplayButton({ metric, autoplayMetric, autoplayAvailability, actions }) {
     const info = autoplayAvailability[metric];
     const isPlaying = autoplayMetric === metric;
+    const label = METRICS[metric].label;
     return (
         <button id={`autoplay-btn-${metric}`} className={`btn btn--col-autoplay${isPlaying ? ' is-playing' : ''}`}
                 disabled={info.disabled}
-                title={isPlaying ? `Stop ${METRIC_LABEL[metric]} auto-play` : info.title}
-                aria-label={`Auto-play best ${METRIC_LABEL[metric]} move`}
+                title={isPlaying ? `Stop ${label} auto-play` : info.title}
+                aria-label={isPlaying ? `Stop ${label} auto-play` : `Auto-play best ${label} move`}
                 onClick={() => actions.toggleAutoPlay(metric)}>
             <svg className="autoplay-icon autoplay-icon--play" viewBox="0 0 12 12" aria-hidden="true">
                 <path d="M3 2.1 L9.6 6 L3 9.9 Z" />
@@ -79,15 +81,25 @@ function AutoplayButton({ metric, explorer }) {
     );
 }
 
-export default function ResultsPanel({ explorer }) {
-    const { tb, activeMetric, actions } = explorer;
-    const tbodyRef = useRef(null);
-    const cleanupRef = useRef(null);
+function MetricAutoplayButton({ activeMetric, autoplayMetric, autoplayAvailability, actions }) {
+    const playing = autoplayMetric !== null;
+    const target = playing ? autoplayMetric : activeMetric;
+    const label = METRICS[target].label;
+    const info = autoplayAvailability[activeMetric];
+    return (
+        <Button id="autoplay-btn" iconOnly icon={playing ? 'stop' : 'play'}
+                className={`metric-strip__play${playing ? ' is-playing' : ''}`}
+                disabled={!playing && info.disabled}
+                title={playing ? `Stop ${label} auto-play` : info.title}
+                aria-label={playing ? `Stop ${label} auto-play` : `Auto-play best ${label} move`}
+                onClick={() => actions.toggleAutoPlay(target)} />
+    );
+}
 
-    useEffect(() => {
-        cleanupRef.current = Tablebase.attachTableEvents(tbodyRef.current);
-        return () => cleanupRef.current?.();
-    }, []);
+function ResultsPanel({ tb, activeMetric, setActiveMetric, autoplayMetric, autoplayAvailability, actions }) {
+    const tbodyRef = useRef(null);
+
+    useEffect(() => Tablebase.attachTableEvents(tbodyRef.current), []);
 
     useEffect(() => initMovesGutterSync(), []);
 
@@ -95,60 +107,63 @@ export default function ResultsPanel({ explorer }) {
         Tablebase.notifyTableRendered();
     }, [tb.rows, tb.rootRow]);
 
+    const rankDigits = Math.max(2, String(tb.rows.reduce((max, row) => Math.max(max, row.rank), 0)).length);
+
     return (
         <Panel
-            className={`results-panel${tb.loading ? ' is-loading' : ''}`}
+            className={`results-panel${tb.pending ? ' is-pending' : ''}${tb.loading ? ' is-loading' : ''}`}
             label="Tablebase results" title="Tablebase Result"
             start={
-                <>
+                <div className="probe-status" style={{ display: tb.progress.visible ? 'flex' : 'none' }}>
                     <span id="probe-progress-label" className="probe-progress-label" aria-live="polite">{tb.progress.label}</span>
-                    <div id="probe-progress" className="probe-progress" style={{ display: tb.progress.visible ? 'block' : 'none' }} aria-hidden="true">
-                        <div className="probe-progress__fill" style={{ width: `${tb.progress.pct}%` }}></div>
+                    <div id="probe-progress" className={`probe-progress${tb.progress.pct === null ? ' is-indeterminate' : ''}`} aria-hidden="true">
+                        <div className="probe-progress__fill" style={{ width: tb.progress.pct === null ? undefined : `${tb.progress.pct}%` }}></div>
                     </div>
-                </>
+                </div>
             }
             end={
                 <>
                     <span id="move-count" className="panel-header__count" aria-live="polite" aria-atomic="true">{tb.moveCount}</span>
-                    <Button id="export-btn" compact iconOnly icon="download" title="Download move table as CSV" onClick={() => actions.exportCsv()}>CSV</Button>
+                    <Button id="export-btn" compact iconOnly icon="download" title={tb.rows.length ? 'Download move table as CSV' : 'No moves to export'} disabled={!tb.rows.length} onClick={actions.exportCsv}>CSV</Button>
                 </>
             }
         >
-            <Segmented
-                className="metric-tabs" itemClassName="metric-tab" variant="tabs" label="Tablebase metric"
-                options={METRIC_OPTIONS} value={activeMetric} onChange={actions.setActiveMetric}
-            />
+            <div className="metric-bar">
+                <div className="metric-strip">
+                    <Segmented
+                        className="metric-tabs" itemClassName="metric-tab" variant="tabs" label="Tablebase metric"
+                        options={METRIC_OPTIONS} value={activeMetric} onChange={setActiveMetric}
+                    />
+                    <MetricAutoplayButton activeMetric={activeMetric} autoplayMetric={autoplayMetric} autoplayAvailability={autoplayAvailability} actions={actions} />
+                </div>
+            </div>
 
-            <div className="moves-view">
+            <div className="moves-view" style={{ '--rank-digits': rankDigits }}>
                 <div className="moves-head">
                     <table className="moves-table moves-table--head" data-active-metric={activeMetric}>
                         <MetricColGroup />
                         <thead>
                             <tr className="group-row">
                                 <th></th>
-                                {METRICS.map(m => (
+                                {METRIC_IDS.map(m => (
                                     <th key={m} id={`th-${m}-grp`} className={`group-${m}`} colSpan={2}>
                                         <span className="group-row-inner">
-                                            <span className="group-label">{METRIC_LABEL[m]}</span>
-                                            <AutoplayButton metric={m} explorer={explorer} />
+                                            <span className="group-label">{METRICS[m].label}</span>
+                                            <AutoplayButton metric={m} autoplayMetric={autoplayMetric} autoplayAvailability={autoplayAvailability} actions={actions} />
                                         </span>
                                     </th>
                                 ))}
                             </tr>
                             <tr className="col-row">
                                 <th id="th-rank" className="col-rank" scope="col" aria-label="Rank">#</th>
-                                <th id="th-dtz-move" className="group-dtz col-move" scope="col">Move</th>
-                                <th id="th-dtz-score" className="group-dtz col-score" scope="col">Score</th>
-                                <th id="th-dtc-move" className="group-dtc col-move" scope="col">Move</th>
-                                <th id="th-dtc-score" className="group-dtc col-score" scope="col">Score/Order</th>
-                                <th id="th-dtm-move" className="group-dtm col-move" scope="col">Move</th>
-                                <th id="th-dtm-score" className="group-dtm col-score" scope="col">Score</th>
-                                <th id="th-dtm50-move" className="group-dtm50 col-move" scope="col">Move</th>
-                                <th id="th-dtm50-score" className="group-dtm50 col-score" scope="col">Score</th>
+                                {METRIC_IDS.flatMap(m => [
+                                    <th key={`${m}-move`} id={`th-${m}-move`} className={`group-${m} col-move`} scope="col">Move</th>,
+                                    <th key={`${m}-score`} id={`th-${m}-score`} className={`group-${m} col-score`} scope="col">{SCORE_HEADER[m] ?? 'Score'}</th>,
+                                ])}
                             </tr>
                             <tr id="root-row" className={`root-row${tb.rootRow ? '' : ' is-hidden'}`}>
                                 <td className="col-rank"></td>
-                                {(tb.rootRow?.cells ?? []).map((cell, idx) => <Cell key={idx} cell={cell} idx={idx} />)}
+                                {(tb.rootRow?.cells ?? []).map((cell, idx) => <Cell key={idx} cell={cell} />)}
                             </tr>
                         </thead>
                     </table>
@@ -166,7 +181,7 @@ export default function ResultsPanel({ explorer }) {
                             {tb.rows.map(row => (
                                 <tr key={row.rank}>
                                     <td className="col-rank" headers="th-rank">{row.rank}</td>
-                                    {row.cells.map((cell, idx) => <Cell key={idx} cell={cell} idx={idx} />)}
+                                    {row.cells.map((cell, idx) => <Cell key={idx} cell={cell} />)}
                                 </tr>
                             ))}
                         </tbody>
@@ -174,10 +189,12 @@ export default function ResultsPanel({ explorer }) {
 
                     <div id="moves-empty-state" className="moves-empty-state" style={{ display: tb.emptyState ? 'flex' : 'none' }} aria-live="polite">
                         <span className="moves-empty-state__icon" aria-hidden="true">♟</span>
-                        <p>Probe a position to see the tablebase ranking of each legal move.</p>
+                        <p>{tb.emptyMessage}</p>
                     </div>
                 </div>
             </div>
         </Panel>
     );
 }
+
+export default memo(ResultsPanel);
