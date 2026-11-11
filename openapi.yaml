@@ -39,7 +39,7 @@ paths:
           description: Request body exceeds 4 KB limit
         "429":
           description: >-
-            Rate limit exceeded -- PROBE_RATE_LIMIT per client IP, or the
+            Rate limit exceeded: PROBE_RATE_LIMIT per client IP, or the
             separate, tighter PREFETCH_RATE_LIMIT when the request carries
             "X-Prefetch: 1" (see that parameter above). Retrying after a
             short wait should succeed.
@@ -59,8 +59,7 @@ paths:
         "503":
           description: >-
             Two distinct causes, both with this status code: (1) tablebase
-            not initialised (none of TABLEBASE_PATH, TABLEBASE_PATH_7_8,
-            or TABLEBASE_PATH_CASTLING opened successfully) - no
+            not initialised (TABLEBASE_PATH is unset or failed to open) - no
             error_code is set on the response body in this case; (2) an
             in-flight probe of this (variant, FEN) pair by another
             concurrent request didn't finish within PROBE_TIMEOUT_SECS
@@ -80,7 +79,10 @@ paths:
         Identical to /probe but returns text/event-stream.
         Each SSE event has a JSON payload in its data field.
         Events are emitted as child positions are probed, followed by the
-        final result or an error event. An error event with
+        final result or an error event. A position with a complete cached
+        response is answered with the final result alone. Lines starting
+        with ":" are SSE keep-alive comments and carry no data.
+        An error event with
         error_code=probe_timeout means a concurrent request was already
         probing the same (variant, FEN) pair and didn't finish in time;
         retrying is usually cheap and likely to resolve.
@@ -114,11 +116,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           description: >-
-            Rate limit exceeded, returned before the stream opens --
+            Rate limit exceeded, returned before the stream opens:
             PROBE_RATE_LIMIT per client IP, or the separate, tighter
             PREFETCH_RATE_LIMIT when the request carries "X-Prefetch: 1"
             (see that parameter above; this is the endpoint the
-            frontend's hover-prefetch actually sets it on). Retrying
+            frontend's hover-prefetch sets it on). Retrying
             after a short wait should succeed.
           content:
             application/json:
@@ -134,6 +136,35 @@ paths:
           description: Tablebase loaded and ready
         "503":
           description: Tablebase not initialised
+
+  /admin:
+    get:
+      operationId: adminDashboard
+      summary: Cache dashboard page
+      description: >-
+        Serves the dashboard HTML page to an authenticated client only. A
+        successful HTTP Basic request also starts the admin session cookie.
+      security:
+        - adminBasic: []
+        - adminSession: []
+      responses:
+        "200":
+          description: Dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+        "401":
+          description: >-
+            Admin authentication required; the response carries a
+            WWW-Authenticate Basic challenge and no page content
+        "429":
+          description: >-
+            Rate limit exceeded (ADMIN_LOGIN_RATE_LIMIT, per client IP,
+            counted for requests that carry credentials). Retrying after a
+            short wait should succeed.
+        "503":
+          description: Admin panel disabled (ADMIN_TOKEN not configured)
 
   /admin/cache/stats:
     get:
@@ -195,7 +226,8 @@ paths:
           description: Incorrect token
         "429":
           description: >-
-            Rate limit exceeded (ADMIN_LOGIN_RATE_LIMIT, per client IP).
+            Rate limit exceeded (ADMIN_LOGIN_RATE_LIMIT, per client IP,
+            shared with /admin requests that carry credentials).
             Retrying after a short wait should succeed.
         "503":
           description: Admin panel disabled (ADMIN_TOKEN not configured)
@@ -214,11 +246,19 @@ components:
       type: http
       scheme: bearer
       description: "Authorization: Bearer <ADMIN_TOKEN>"
+    adminBasic:
+      type: http
+      scheme: basic
+      description: >-
+        HTTP Basic with any username and ADMIN_TOKEN as the password;
+        accepted on GET /admin only
     adminSession:
       type: apiKey
       in: cookie
       name: session
-      description: Session cookie set by a successful POST /admin/login
+      description: >-
+        Session cookie set by a successful POST /admin/login or by an
+        authenticated Basic GET /admin
   parameters:
     XPrefetch:
       name: X-Prefetch
@@ -230,7 +270,7 @@ components:
       description: >-
         Set to "1" by the frontend's hover-prefetch (frontend/src/engine/tablebase.js)
         to route this request to PREFETCH_RATE_LIMIT instead of
-        PROBE_RATE_LIMIT -- a separate, tighter per-client-IP budget, never
+        PROBE_RATE_LIMIT - a separate, tighter per-client-IP budget, never
         an exemption from rate limiting (see app.py's _request_probe_limit).
         A real, user-initiated probe should not set this header.
   schemas:
@@ -248,7 +288,7 @@ components:
             variant="chess960". Either way, a letter naming a right with
             no matching king and rook on the board is rejected with a 400
             response. A right that does have one is accepted and probed
-            (see TABLEBASE_PATH_CASTLING in the project README). A FEN
+            (see TABLEBASE_PATH in the project README). A FEN
             longer than 100 characters is rejected with a 400 response.
           example: "4k3/8/8/8/8/8/8/4K2R w - - 0 1"
         variant:
@@ -298,6 +338,18 @@ components:
         outcome:
           type: string
           enum: [win, cursed_win, draw, blessed_loss, loss, unknown, not_available]
+        wdl50:
+          type: integer
+          nullable: true
+          enum: [-2, 0, 2, null]
+          description: >-
+            This move's result at the resulting position's own halfmove
+            clock, for the side making the move (2=win, 0=draw, -2=loss).
+            Unlike outcome in the dtz and dtm lists, it accounts for the
+            clock: a win or loss that the clock has run out on is 0. The
+            same value appears in every metric's entry for a move. Null
+            when a win or loss cannot be decided (no DTZ table) and for a
+            move that could not be probed.
         available:
           type: boolean
           description: >-
@@ -325,7 +377,12 @@ components:
 
     Summary:
       type: object
-      description: Outcome distribution across all legal moves
+      description: >-
+        Outcome distribution across all legal moves under the 50-move rule,
+        using each resulting position's wdl50 at its own halfmove clock.
+        Cursed wins, blessed losses, and wins or losses that exceed the clock
+        count as draws. A move whose outcome cannot be resolved counts as
+        unknown, including failed child probes.
       properties:
         wins:    {type: integer}
         draws:   {type: integer}
@@ -355,6 +412,15 @@ components:
             True when dtz may still be one ply off after the moves have been
             cross-checked against it. Only cursed wins and blessed losses can
             be rounded. Null when dtz_available is false.
+        wdl50:
+          type: integer
+          nullable: true
+          enum: [-2, 0, 2, null]
+          description: >-
+            Root position result at its own halfmove clock (2=win, 0=draw,
+            -2=loss). Cursed wins, blessed losses, and wins or losses whose
+            DTZ does not fit the clock are draws. Null when a win or loss
+            cannot be decided (no DTZ table).
         dtc:
           type: array
           items:
@@ -421,7 +487,9 @@ components:
           description: >-
             All legal moves ranked by Distance to Conversion (best first);
             ranked by pawn pushes still owed first, then plies (DTC's own
-            notion of a better line - see MoveEntry.order)
+            notion of a better line - see MoveEntry.order). Moves that are
+            draws at this clock are ordered by their result from a fresh
+            clock, as in moves_dtz.
         moves_dtm:
           type: array
           items:
@@ -431,7 +499,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MoveEntry"
-          description: All legal moves ranked by DTM under the 50-move rule (best first)
+          description: >-
+            All legal moves ranked by DTM under the 50-move rule (best first).
+            Moves that are draws at this clock are ordered by their result and
+            mate distance from a fresh clock, as in moves_dtm (or moves_dtz
+            without DTM).
         summary:
           $ref: "#/components/schemas/Summary"
 
@@ -483,7 +555,7 @@ components:
       type: object
       description: >-
         Point-in-time hit-rate counters for both in-process LRUs, plus the
-        static config and tablebase tier info they're sized against.
+        static config and tablebase info they're sized against.
       properties:
         evaluate_fen_cache:
           $ref: "#/components/schemas/CacheCounters"
@@ -497,11 +569,9 @@ components:
             block_cache_bytes: {type: integer}
         tablebase:
           type: object
-          description: Which of the three routing tiers are configured (see RoutedTablebase).
+          description: Whether the ordered source resolver is configured.
           properties:
-            low_configured: {type: boolean}
-            high_configured: {type: boolean}
-            castling_configured: {type: boolean}
+            configured: {type: boolean}
         thread_pool:
           type: object
           properties:
@@ -511,9 +581,9 @@ components:
         tablebase_cache:
           type: object
           description: >-
-            Per-tier cache statistics: router_block_cache plus one entry
-            for each configured tier (low, high, castling) that reports its
-            own. Omitted when nothing reports statistics.
+            Cache statistics: block_cache plus one entry named source
+            containing the resolver's own cache statistics. Omitted when
+            nothing reports statistics.
           additionalProperties: true
 
     CacheCounters:
@@ -538,11 +608,11 @@ components:
           type: boolean
           description: >-
             Whether the underlying chess.chesstb block cache was also
-            cleared, not just this app's own two LRUs above.
+            cleared, not only this app's own two LRUs above.
         tablebase_cache:
           type: object
           description: >-
-            Per-tier cache statistics: router_block_cache plus one entry
-            for each configured tier (low, high, castling) that reports its
-            own. Omitted when nothing reports statistics.
+            Cache statistics: block_cache plus one entry named source
+            containing the resolver's own cache statistics. Omitted when
+            nothing reports statistics.
           additionalProperties: true

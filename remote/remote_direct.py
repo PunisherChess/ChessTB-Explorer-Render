@@ -1,42 +1,28 @@
-"""Byte-range ChessTB tablebase access: probe remote tables in place,
-fetching only the bytes each probe touches.
+"""remote_direct.py: byte-range ChessTB tablebase access that probes remote
+tables in place, fetching only the bytes each probe touches.
 
-How this differs from remote_fallback.py
-----------------------------------------
-remote_fallback.py downloads a whole table file on first touch and hands
-the standard ``WDLFile``/``DTZFile``/``DTCFile``/``DTMFile``/``DTM50File``
-a local path. This module instead resolves a material to a
-:class:`remote_source.RemoteFile` without downloading it.
-tablebase_router's file classes read it through
+A material resolves to a :class:`remote_source.RemoteFile` without a
+download. tablebase_router's file classes read it through
 :class:`remote_source.RemoteFileView` by overriding
 ``chess.chesstb._TableFile._open_source``, the upstream seam for reading
-through any buffer-shaped object. The table's header parse plus each
-probe's block reads pull only their own byte ranges through the shared page
-cache. A material's first touch fetches its existence, size, and first page
-together in one round trip (see ``_remote_size`` /
+through any buffer-shaped object. The header parse and each probe's block
+reads pull only their own byte ranges through the shared page cache. A
+material's first touch fetches its existence, size, and first page in one
+round trip (see ``_remote_size`` and
 :meth:`remote_source.RemoteHTTPClient.get_first_page`) and seeds the page
-cache with it, since the header parse that runs immediately afterward needs
-exactly that page next anyway.
+cache with it, since the header parse needs that page next.
 
-Trade-off against remote_fallback.py
-------------------------------------
-Cold cost is "a handful of 256 KiB pages" rather than "one full table
-download", and ``REMOTE_PAGE_CACHE_BYTES`` bounds memory only -- nothing
-is written to disk here at all.
+Compared with remote_fallback.py, cold cost is a handful of 256 KiB pages
+rather than one full table download, and ``REMOTE_PAGE_CACHE_BYTES`` bounds
+memory only; nothing is written to disk. Every 8-byte bit-window read
+(:func:`chess.chesstb._read_u64le`) is a Python call into
+:meth:`remote_source.RemoteFile.read` (a dict lookup and a slice) rather
+than a C-level ``unpack_from``. This backend therefore wins while a session
+ranges over many materials and loses to remote_fallback.py once one
+material is probed often enough for a download to amortize.
+``config.REMOTE_MODE`` selects between them.
 
-The cost is per-read CPU. Against a mapping, the hot 8-byte bit-window
-read (:func:`chess.chesstb._read_u64le`) is a C-level ``unpack_from``;
-here every one of them is a Python call into
-:meth:`remote_source.RemoteFile.read` -> a dict lookup and a slice, even
-on a page-cache hit. So this backend wins decisively while a session
-ranges over many materials (the common case for an explorer: most tables
-are touched a few times each) and loses to remote_fallback.py once a
-single material is probed hard enough that the download amortizes.
-config.py's ``REMOTE_MODE`` selects between them.
-
-Per-material opening
---------------------
-``RoutedTablebase`` locks first opens per ``(kind, material)`` (see
+``SourcedTablebase`` locks first opens per ``(kind, material)`` (see
 tablebase_opening.py), so the network round trip in ``_find`` for one
 material does not block another material of the same kind.
 """
@@ -55,7 +41,7 @@ __all__ = ["open_tablebase"]
 
 
 class _RemoteTablebase(chesstb.Tablebase):
-    """Resolves tables to HTTP byte-range handles for ``RoutedTablebase``;
+    """Resolves tables to HTTP byte-range handles for ``SourcedTablebase``;
     it is not probed itself.
     """
 
@@ -73,7 +59,7 @@ class _RemoteTablebase(chesstb.Tablebase):
         # across the cache's shards.
         self._page_cache = remote_source._PageCache(remote_page_cache_bytes)
         self._page_size = remote_page_size
-        # A cached None means "asked, no such table" -- same contract as the
+        # A cached None means "asked, no such table" - same contract as the
         # open caches upstream keeps, so a missing material costs one HEAD
         # for the session rather than one per probe.
         self._sizes: Dict[str, Optional[int]] = {}
@@ -83,7 +69,7 @@ class _RemoteTablebase(chesstb.Tablebase):
     def add_directory(self, base_dir: str) -> None:
         """No-op. The base class's version os.path.joins kind
         subdirectories onto ``base_dir`` and stashes the result in
-        ``self.dirs`` for ``_find`` to search -- this subclass's own
+        ``self.dirs`` for ``_find`` to search - this subclass's own
         ``_find`` below builds ``"<kind>/<name><ext>"`` relative to the
         remote base URL directly and never consults ``self.dirs``."""
 
@@ -102,7 +88,7 @@ class _RemoteTablebase(chesstb.Tablebase):
         with self._size_lock:
             if rel_path in self._sizes:
                 return self._sizes[rel_path]
-        # First touch of this material (always under RoutedTablebase's
+        # First touch of this material (always under SourcedTablebase's
         # per-(kind, material) lock, see tablebase_opening.py): one ranged
         # GET for page 0 answers "does it exist", "how big is it", and
         # "here's its header" together, since the header parse about to run
@@ -115,14 +101,14 @@ class _RemoteTablebase(chesstb.Tablebase):
             self._page_cache.put((rel_path, 0), data)
         return size
 
-    # --- lifecycle / admin surfaces (RoutedTablebase reaches these via
+    # --- lifecycle / admin surfaces (SourcedTablebase reaches these via
     #     getattr) ---
 
     def close(self) -> None:
         try:
             super().close()
         finally:
-            # Runs after RoutedTablebase.close() has drained in-flight
+            # Runs after SourcedTablebase.close() has drained in-flight
             # probes and released every table's view. Nested try/finally
             # so the connection pool is still released even if clearing
             # the page cache raises.
@@ -132,8 +118,8 @@ class _RemoteTablebase(chesstb.Tablebase):
                 self._client.close()
 
     def clear_caches(self) -> None:
-        """Drop decoded blocks and fetched pages, keeping open tables open
-        -- reopening would only re-fetch the same headers immediately."""
+        """Drop decoded blocks and fetched pages, keeping open tables open;
+        reopening would only re-fetch the same headers immediately."""
         self._block_cache.clear()
         self._page_cache.clear()
 

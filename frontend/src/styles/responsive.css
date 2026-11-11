@@ -1,8 +1,12 @@
 /* ── Responsive layout ─────────────────────────────────────────────────
-   At 1180px and below the columns wrap: the board column takes a
-   full-width row and the results and PGN columns wrap beneath it. Sizes
-   are authored in rem. */
-@media (max-width: 1180px) {
+   Breakpoints are in em, which media queries resolve against the browser
+   default font size, so each layout starts at a proportionally larger
+   width when that size is larger: 48em, 73.75em, and 73.8125em are 768px,
+   1180px, and 1181px at 16px. At 73.75em and below the content is a
+   two-column grid. From 48em up, the board and PGN columns share the first
+   row and the results column takes the full-width second row. Sizes are
+   authored in rem. */
+@media (max-width: 73.75em) {
     html, body { height: auto; overflow-y: auto; }
     :root { --pgn-col-w: 18.75rem; }
     .content {
@@ -11,38 +15,42 @@
         overflow: visible;
         padding: var(--space-4);
     }
-    .left-col {
-        grid-column: 1 / -1;
-        height: auto;
-    }
+    .left-col { height: auto; }
     /* Horizontal auto margins centre a fixed-width flex item on the
        cross axis of a column-direction container. */
     .board-group { margin: 0 auto; }
 
-    .right-col, .pgn-col {
-        height: min(60vh, 520px);
-    }
+    .right-col { height: min(60vh, 32.5rem); }
+}
+
+@media (min-width: 48em) and (max-width: 73.75em) {
+    .left-col  { grid-column: 1; grid-row: 1; }
+    .pgn-col   { grid-column: 2; grid-row: 1; contain: size; }
+    .right-col { grid-column: 1 / -1; grid-row: 2; }
 }
 
 /* ── Phone: swipeable screens ───────────────────────────────────────────
-   Below 768px the layout is three horizontally swipeable screens in
+   Below 48em the layout is three horizontally swipeable screens in
    column order: board, results, PGN. Each screen fills the space between
    the header and the bottom screen navigation; a horizontal swipe moves
    to the next one, while a vertical swipe scrolls that screen's own
    content. The board is sized to the visible height so the whole board
-   screen fits; below its 14rem floor the screen scrolls from the top. */
-@media (max-width: 767px) {
+   screen fits; below its 14rem floor, which never exceeds 88vw, the screen
+   scrolls from the top. */
+@media (max-width: 47.9375em) {
     :root {
         --screen-nav-h: calc(3rem + env(safe-area-inset-bottom, 0px));
         --viewport-h: 100vh;
 
-        /* Fixed heights above and around the board: three control rows,
-           column padding 1rem, gaps 1.875rem, error line 0.875rem plus
-           0.5rem slack, tray padding 1.25rem and tray borders 4px. The
-           remainder holds the board and its two trays: 1.25 x board.
-           Update when the height above the board changes. */
-        --board-fit-h: calc((var(--viewport-h) - var(--header-h) - var(--screen-nav-h) - 5.5rem - 3 * var(--control-h) - 4px) / 1.25);
-        --board-size: max(14rem, min(var(--board-size-cap), var(--board-fit-h)));
+        --control-h: 2.5rem;
+        --fen-icon-btn-w: 2.25rem;
+
+        /* The 14rem reserve covers the controls above the board, the turn
+           toggle, the trays and the column padding, with room for one
+           error line. The remainder holds the board and its two trays:
+           1.25 x board. Update when the height above the board changes. */
+        --board-fit-h: calc((var(--viewport-h) - var(--header-h) - var(--screen-nav-h) - 14rem) / 1.25);
+        --board-size-fit: min(88vw, max(14rem, min(var(--board-size-cap), var(--board-fit-h))));
     }
     @supports (height: 100dvh) {
         :root { --viewport-h: 100dvh; }
@@ -74,10 +82,20 @@
     }
     .left-col {
         overflow-y: auto;
+        justify-content: center;
         padding: var(--space-2) var(--space-4);
+        gap: var(--space-4);
     }
     .board-group { margin: 0 auto; }
-    .right-col, .pgn-col { padding: var(--space-4); overflow: hidden; }
+    .right-col, .pgn-col { padding: 0; overflow: hidden; }
+    /* The move-number column takes the share of the list width that the
+       results table's single-metric rank column takes, and widens for a
+       larger number. */
+    .move-line { grid-template-columns: minmax(14%, auto) 1fr 1fr; }
+    .move-line__variation { --indent-base: calc(7% + 0.625rem); }
+
+    .fen-block { gap: var(--space-2); }
+    .error-line:empty { display: none; }
 
     /* Logo and nav span two rows; the subtitle sits below the title. */
     .site-header {
@@ -104,24 +122,27 @@
     .screen-nav { display: grid; }
     .toast-container { bottom: calc(var(--screen-nav-h) + var(--space-3)); }
 
-    /* The moves list owns vertical panning so a drag on it is not claimed
-       by .content's horizontal scroll-snap. */
+    /* The moves list pans vertically itself; horizontal drags chain to
+       .content's scroll-snap so the whole table is a swipe area. */
     .moves-body-scroll {
-        touch-action: pan-y;
+        touch-action: pan-x pan-y;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior-y: contain;
     }
     /* The table spans the full screen width, so it is not widened for the scrollbar. */
     .moves-body-scroll.has-vscroll .moves-table--body { width: 100%; }
-
-    .move-line { --pgn-rank-width: var(--pgn-rank-w-compact); }
 }
 
-@media (max-width: 480px) {
-    :root { --board-size-cap: min(360px, 88vw); }
-    .left-col, .right-col, .pgn-col {
+@media (max-width: 30em) {
+    /* The 360px floor keeps the board from shrinking below its size at a 16px root. */
+    :root { --board-size-cap: min(max(22.5rem, 360px), 88vw); }
+    .left-col {
         padding-left:  max(var(--space-4), env(safe-area-inset-left));
         padding-right: max(var(--space-4), env(safe-area-inset-right));
+    }
+    .right-col, .pgn-col {
+        padding-left:  env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
     }
     .site-header {
         padding-left:  max(var(--space-5), env(safe-area-inset-left));
@@ -129,12 +150,12 @@
     }
 
     /* Title, count and CSV button do not fit one row at this width. */
-    .panel-header { flex-wrap: wrap; row-gap: 6px; }
+    .panel-header { flex-wrap: wrap; row-gap: 0.375rem; }
 
     /* .btn--grow deliberately doesn't shrink (readable label + icon at
        any width) - six buttons can't all fit one row this narrow, so
        the toolbar wraps instead of overflowing. */
-    .fen-actions { flex-wrap: wrap; row-gap: 6px; }
+    .fen-actions { flex-wrap: wrap; row-gap: 0.375rem; }
 }
 
 /* ── Touch input sizing ─────────────────────────────────────────────────
@@ -149,4 +170,17 @@
     /* #board handles its own drag gestures; letting the browser also
        interpret them as page-scroll/pinch-zoom fights the drag. */
     .spare-piece, .promotion-piece-btn { touch-action: none; }
+}
+
+/* An invisible ::after extends each phone control's tap area vertically to
+   --touch-target. A turn button sits inside its toggle's padding and 1px
+   border. The metric strip button sets its own tap area. */
+@media (max-width: 47.9375em) and (hover: none) and (pointer: coarse) {
+    .btn:not(.metric-strip__play), .turn-btn { position: relative; }
+    .btn:not(.metric-strip__play)::after, .turn-btn::after {
+        content: '';
+        position: absolute;
+        inset: calc((var(--control-h) - var(--touch-target)) / 2) 0;
+    }
+    .turn-btn::after { inset-block: calc((var(--control-h) - var(--touch-target)) / 2 - var(--seg-pad) - 1px); }
 }

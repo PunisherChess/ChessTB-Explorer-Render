@@ -1,84 +1,77 @@
 """
 config.py: ChessTB Explorer configuration
 
-Edit the values below directly, then run `python app.py`. This file
-contains the primary application configuration. A subset of settings is
-also readable from the process environment, with the literal value below
-used when the environment variable is unset, allowing one committed
-configuration file to serve multiple deployment platforms.
+Edit the values below directly, then run `python app.py`. A subset of
+settings is also read from the process environment, with the literal value
+used when the variable is unset, so one committed file serves multiple
+deployment platforms.
 
-  - ADMIN_TOKEN / FLASK_SECRET_KEY: always from the environment only
-    (no literal fallback below) so they can be set as platform secrets
-    (e.g. a Render "Environment Variable" marked secret, or a Hugging
-    Face Space "Secret") without ever committing them - see the "Admin"
-    section below.
-  - PORT: read from the environment with a literal fallback, because
-    platforms like Render assign the port dynamically per-deployment
-    (via the platform's PORT variable) rather than using a fixed value;
-    see the "Server" section below.
-  - TABLEBASE_PATH / TABLEBASE_PATH_7_8 / TABLEBASE_PATH_CASTLING /
-    GITHUB_URL: read from the environment with a literal fallback,
-    to allow a deployment (for example, a Render Web Service) to select a
-    different tablebase location or repository URL without modifying the
-    source file; editing the literal value below remains supported.
+  - ADMIN_TOKEN / FLASK_SECRET_KEY: environment only, with no literal
+    fallback, so they can be platform secrets (see "Admin" below).
+  - PORT: environment with a literal fallback, since platforms assign the
+    port per deployment (see "Server" below).
+  - TABLEBASE_PATH / GITHUB_URL: environment with a literal fallback, so a
+    deployment can select another tablebase location or repository URL.
 
 Invalid values (wrong type, out of range) make the app log an error and
-exit at startup rather than run with a silently-wrong configuration;
-see AppConfig.from_config() in app.py.
+exit at startup; see AppConfig.from_config() in app.py.
 """
 
 import os
 
 # ── Tablebase location ──────────────────────────────────────────────────────
 
-# ChessTB tables are split three ways: TABLEBASE_PATH covers positions
-# with 6 or fewer men on the board, TABLEBASE_PATH_7_8 covers 7 and 8,
-# and TABLEBASE_PATH_CASTLING covers positions where a king or rook still
-# has a usable castling right, independently of piece count (chess.chesstb
-# names that table differently and never resolves such a position from
-# either of the other two, however many men are on the board). Every
-# probe is routed by inspecting the exact position being probed - a root
-# position and a child position one of its moves leads to (one piece
-# fewer after a capture, or with a castling right given up) can resolve
-# through a different path within the same request. See
+def _tablebase_path_from_env(default: str) -> "str | list[str]":
+    """Returns TABLEBASE_PATH from the environment: one path, or a list for
+    comma-separated entries. Returns `default` when the variable is unset."""
+    value = os.environ.get("TABLEBASE_PATH")
+    if value is None:
+        return default
+    paths = [p.strip() for p in value.split(",") if p.strip()]
+    if not paths:
+        return ""
+    return paths[0] if len(paths) == 1 else paths
+
+
+# TABLEBASE_PATH locates the ChessTB tables for every position, whatever
+# its piece count or castling rights. A single path is a tablebase root and
+# expands to <root>/full, <root>/full/castling, <root>, and <root>/castling,
+# searched in that order: full tables are preferred over shipping tables,
+# and a position and the child positions it depends on share that order.
+# Castling materials (lowercase `r` in the name) search only the
+# castling entries, and other materials only the remaining ones. For a
+# local root, entries whose directory does not exist are skipped. See
 # tablebase_router.py's module docstring for the full design.
 #
-# Each of the three settings accepts:
-#   - a local directory path         TABLEBASE_PATH = r"C:\chesstb\6men"
-#                                     TABLEBASE_PATH = "/data/chesstb/6men"
-#   - an http(s):// base URL         TABLEBASE_PATH = "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve/full"
+# TABLEBASE_PATH accepts:
+#   - a local root directory         TABLEBASE_PATH = r"C:\chesstb"
+#                                     TABLEBASE_PATH = "/data/chesstb"
+#   - an http(s):// root URL         TABLEBASE_PATH = "https://huggingface.co/buckets/chesstb/chesstb/resolve"
 #                                     (the bucket's /resolve path - see README.md)
-#   - a list mixing the two, tried left-to-right until one has the
-#     material being probed - a "hybrid" source, typically a local mirror
-#     of frequently probed materials backed by a remote URL for the rest:
-#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://huggingface.co/buckets/noobpwnftw/chesstb/resolve/full"]
-#     (the environment-variable override below only ever supplies a
-#     single path - a hybrid list can only be set here, as a literal.)
+#   - a list of explicit sources, used as given with no expansion and tried
+#     left-to-right until one has the material being probed - a "hybrid"
+#     source, typically a local mirror of frequently probed materials
+#     backed by a remote URL for the rest. An entry listed together with
+#     its `castling` subdirectory forms a pair, as above:
+#       TABLEBASE_PATH = ["/data/chesstb/6men", "https://example.org/tables"]
+#     (the environment variable supplies a root as one entry, or the same
+#     list as comma-separated entries:
+#     TABLEBASE_PATH=/data/chesstb/6men,https://example.org/tables)
 #
-# Only TABLEBASE_PATH is required. TABLEBASE_PATH_7_8 left empty routes
-# every non-castling position - 7 and 8 men included - through
-# TABLEBASE_PATH, matching a single combined directory or URL that
-# already covers up to 8 men. TABLEBASE_PATH_CASTLING left empty routes a
-# still-usable-castling-right position through TABLEBASE_PATH the same
-# way, rather than reporting it as not covered - most deployments never
-# need either override, since 7-8 man tables run into the terabytes and
-# castling rights are vanishingly rare in sub-9-man endgames.
+# Left empty, the app still starts, but every /probe request will fail
+# and /health will report "degraded" until TABLEBASE_PATH is set.
 #
-# Left empty too, the app still starts, but every /probe request will
-# fail and /health will report "degraded" until TABLEBASE_PATH is set.
-#
-# All three are also readable from an environment variable of the same
-# name (falling back to the literal value below when unset). On Render,
-# the setting can be supplied from the service configuration without
-# modifying the source file. A tablebase set this large (the full ChessTB set runs
-# into the terabytes) is virtually always the remote/URL form in a PaaS
-# deployment: attaching that much persistent disk to a single web service
-# is both impractical and, at a platform's normal per-GB disk pricing,
-# far more expensive than serving it remotely and probing with
-# REMOTE_MODE = "direct" below, which stores nothing on disk at all.
-TABLEBASE_PATH          = os.environ.get("TABLEBASE_PATH", "")
-TABLEBASE_PATH_7_8      = os.environ.get("TABLEBASE_PATH_7_8", "")
-TABLEBASE_PATH_CASTLING = os.environ.get("TABLEBASE_PATH_CASTLING", "")
+# TABLEBASE_PATH is also readable from an environment variable of the
+# same name (falling back to the literal value passed below when unset). On
+# Render, the setting can be supplied from the service configuration
+# without modifying the source file. A tablebase set this large (the
+# full ChessTB set runs into the terabytes) is virtually always the
+# remote/URL form in a PaaS deployment: attaching that much persistent
+# disk to a single web service is both impractical and, at a platform's
+# normal per-GB disk pricing, far more expensive than serving it
+# remotely and probing with REMOTE_MODE = "direct" below, which stores
+# nothing on disk at all.
+TABLEBASE_PATH = _tablebase_path_from_env("")
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
@@ -164,17 +157,16 @@ BLOCK_CACHE_BYTES = 64 * 1024 * 1024
 
 # ── Remote (URL) tablebase entries only ─────────────────────────────────────
 # Everything below is ignored for a local-directory entry; it applies to
-# every http(s):// entry across TABLEBASE_PATH, TABLEBASE_PATH_7_8, and
-# TABLEBASE_PATH_CASTLING (including entries inside a hybrid list - see
-# above). See the module docstrings of remote/remote_direct.py and
+# every http(s):// entry in TABLEBASE_PATH (including entries inside a
+# hybrid list - see above). See the module docstrings of remote/remote_direct.py and
 # remote/remote_fallback.py for the full design.
 
 # How a remote table's bytes reach the prober:
 #
-#   "direct"   -- probe the remote tables in place, fetching only the
+#   "direct":     probe the remote tables in place, fetching only the
 #                 page-sized byte ranges each probe reads, nothing written
 #                 to disk (remote/remote_direct.py).
-#   "download" -- fetch each table file in full on first touch and cache it
+#   "download":   fetch each table file in full on first touch and cache it
 #                 on local disk (remote/remote_fallback.py). Slower first
 #                 touch of a material and real disk usage, but every read
 #                 after it is a local mmap read.
@@ -193,14 +185,16 @@ BLOCK_CACHE_BYTES = 64 * 1024 * 1024
 # materials accessed.
 REMOTE_MODE = "direct"
 
-# Soft budget, in bytes, shared across every remote table opened this
-# session: bounds the in-memory page cache in "direct" mode, and the
-# on-disk cache of whole downloaded table files in "download" mode.
+# Soft budget, in bytes, per remote source in TABLEBASE_PATH, shared across
+# that source's tables: bounds the in-memory page cache in "direct" mode, and
+# the on-disk cache of whole downloaded table files in "download" mode. Four
+# remote sources, such as the entries of an expanded remote root, can retain
+# four times this budget in total.
 REMOTE_PAGE_CACHE_BYTES = 128 * 1024 * 1024
 
 # Size, in bytes, of one page. In "direct" mode this is the granularity of
 # every fetch, so it sets the trade between over-fetching (too large) and
-# many round trips per probe (too small) -- 256 KiB keeps a table's whole
+# many round trips per probe (too small) - 256 KiB keeps a table's whole
 # header + index region within a page or two, which is what makes later
 # probes of the same table cheap. In "download" mode it is only the chunk
 # size used while streaming a full file down, and has no effect on which
@@ -232,17 +226,17 @@ REMOTE_POOL_MAXSIZE = None
 # can be combined with ";"). Backed by an in-process memory store, which
 # is enough for a single-container deployment (e.g. one Render Web
 # Service instance) but does not share state across multiple replicas.
-# Left empty, rate limiting is disabled entirely.
+# Left empty, rate limiting is disabled.
 #
-# 60 per minute comfortably covers normal browsing and autoplay at its
-# default 1.25s delay; raise it if legitimate autoplay at a fast delay
+# 60 per minute comfortably covers normal browsing and auto-play at its
+# default 1.25s delay; raise it if legitimate auto-play at a fast delay
 # setting gets throttled, or lower it if the deployment sees abuse.
-PROBE_RATE_LIMIT = "60 per minute"
+PROBE_RATE_LIMIT = "180 per minute"
 
 # Per-client-IP limit applied only to requests that identify themselves as
 # background hover-prefetch via the "X-Prefetch: 1" request header (see
 # frontend/src/engine/tablebase.js's hover-prefetch). Deliberately separate from,
-# and tighter than, PROBE_RATE_LIMIT -- a client-supplied header is not
+# and tighter than, PROBE_RATE_LIMIT - a client-supplied header is not
 # trusted enough to exempt a request from limiting altogether (any
 # client could tag every request "prefetch" to bypass PROBE_RATE_LIMIT),
 # only to route it to its own, smaller budget, so a sustained hover sweep
@@ -252,18 +246,19 @@ PROBE_RATE_LIMIT = "60 per minute"
 # PROBE_RATE_LIMIT with everything else, as if this setting didn't exist.
 PREFETCH_RATE_LIMIT = "30 per minute"
 
-# Per-client-IP limit on /admin/login (config.py's ADMIN_TOKEN check),
-# same string syntax as PROBE_RATE_LIMIT above and backed by the same
-# in-process memory store. Separate from PROBE_RATE_LIMIT because
-# /admin/login is a brute-forceable shared-secret check, not a CPU-bound
-# probe -- it needs a tighter limit than "comfortably covers normal
-# browsing" calls for. Applies to both failed and successful login
-# attempts. Left empty, login attempts are not rate limited at all.
+# Per-client-IP limit on ADMIN_TOKEN checks at /admin/login and on /admin
+# requests that carry credentials (one shared budget), same string syntax
+# as PROBE_RATE_LIMIT above and backed by the same in-process memory store.
+# Separate from PROBE_RATE_LIMIT because these are brute-forceable
+# shared-secret checks, not CPU-bound probes - they need a tighter limit
+# than "comfortably covers normal browsing" calls for. Applies to both
+# failed and successful attempts. Left empty, these attempts are not rate
+# limited at all.
 ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 
 # Number of trusted reverse-proxy hops in front of this application.
 # PROBE_RATE_LIMIT and ADMIN_LOGIN_RATE_LIMIT above both key on the
-# client's IP address (request.remote_addr) -- behind a reverse proxy
+# client's IP address (request.remote_addr) - behind a reverse proxy
 # that's the proxy's own address unless it's corrected for, which would
 # collapse every client behind that proxy onto one shared rate-limit key.
 # The same trusted-hop count also governs whether X-Forwarded-Proto is
@@ -272,8 +267,8 @@ ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 # rather than at this app itself.
 #
 # In production (DEBUG = False), app.py passes this to waitress's own
-# trusted_proxy_count, since waitress -- the actual production WSGI
-# server -- parses X-Forwarded-For/X-Forwarded-Proto and corrects
+# trusted_proxy_count, since waitress - the actual production WSGI
+# server - parses X-Forwarded-For/X-Forwarded-Proto and corrects
 # REMOTE_ADDR/wsgi.url_scheme itself, before Flask ever sees the request.
 # app.py also applies Werkzeug's ProxyFix with the same count, which
 # makes the equivalent correction for the DEBUG = True Flask-dev-server
@@ -283,8 +278,8 @@ ADMIN_LOGIN_RATE_LIMIT = "5 per minute"
 # 1 is correct for this project's own render.yaml / "Deploying to Render"
 # topology: Render's platform edge/load-balancer sits in front of a web
 # service exactly once. Increase it when an additional reverse proxy is
-# present in front of the service. Set to 0 when no reverse proxy is present
-# -- a value that does not match the actual proxy chain
+# present in front of the service. Set to 0 when no reverse proxy is present;
+# a value that does not match the actual proxy chain
 # leaves the rate limiter keying on the wrong address (or the scheme
 # misdetected), or (set too high for no proxy at all) trusting a
 # client-supplied X-Forwarded-For/X-Forwarded-Proto header directly,
@@ -299,9 +294,10 @@ TRUSTED_PROXY_COUNT = os.environ.get("TRUSTED_PROXY_COUNT", "1")
 # Render "Environment Variable" marked secret, generated automatically by
 # render.yaml's generateValue: true) rather than committing it here.
 # Left unset, every admin route responds 503 rather than running without
-# a password. Visiting /admin with no active session shows a login form;
-# a correct token there starts a signed session cookie. API clients may
-# instead send "Authorization: Bearer <ADMIN_TOKEN>" directly.
+# a password. Visiting /admin without credentials returns 401 with an HTTP
+# Basic challenge and no page content; the token entered as the password
+# starts a signed session cookie. API clients may instead send
+# "Authorization: Bearer <ADMIN_TOKEN>" directly.
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 # Key Flask uses to sign the admin session cookie. Read from the
@@ -313,23 +309,24 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 # with multiple replicas, or to survive routine restarts).
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
 
-# Whether the admin session cookie set by /admin/login requires HTTPS.
-# Independent of DEBUG above -- DEBUG is a development/runtime behavior
+# Whether the admin session cookie set by /admin/login and /admin requires
+# HTTPS.
+# Independent of DEBUG above - DEBUG is a development/runtime behavior
 # switch, not a reliable indicator of the deployment's transport security,
 # so a deployment can legitimately run DEBUG=False (production-like
 # behavior) while still being served over plain HTTP. Leaving this True
 # for such a deployment sets the cookie Secure, which a browser then
-# won't send back over a plain HTTP connection -- /admin/login would
-# appear to succeed while every subsequent authenticated /admin/* request
-# came back 401.
+# won't send back over a plain HTTP connection - /admin/login and /admin
+# would appear to succeed while every subsequent authenticated
+# /admin/cache/* request came back 401.
 #
 # Read from the environment, like TRUSTED_PROXY_COUNT above, so a
 # deployment (e.g. render.yaml's Render blueprint, which sets this to
 # "true" explicitly) can configure it without editing this file. Defaults
 # to False (via SESSION_COOKIE_SECURE unset or anything other than
 # "true") because that's what a local installation needs (README.md's
-# "Installation"): `python app.py` served over http://127.0.0.1:7860 --
-# plain HTTP -- after editing only TABLEBASE_PATH above, with DEBUG and
+# "Installation"): `python app.py` served over http://127.0.0.1:7860,
+# plain HTTP, after editing only TABLEBASE_PATH above, with DEBUG and
 # this setting both left at their defaults.
 #
 # Set this to "true" for any deployment the browser reaches over HTTPS,
@@ -341,7 +338,7 @@ SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").strip()
 # ── Links ────────────────────────────────────────────────────────────────────
 
 # Repository URL for the GitHub button shown in the header of every page.
-# Left empty, the button is omitted entirely. Also readable from a
+# Left empty, the button is omitted. Also readable from a
 # GITHUB_URL environment variable (falling back to the literal string
 # below when unset), so a platform deployment can set it from its own
 # dashboard without a commit - see render.yaml.

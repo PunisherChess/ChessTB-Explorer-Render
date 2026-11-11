@@ -1,3 +1,5 @@
+/** App.jsx: explorer page layout */
+
 import { useExplorer } from './hooks/useExplorer.js';
 import Header from './components/Header.jsx';
 import FenBar from './components/FenBar.jsx';
@@ -10,34 +12,56 @@ import Toasts from './components/Toasts.jsx';
 import PromotionDialog from './components/PromotionDialog.jsx';
 import ScreenNav from './components/ScreenNav.jsx';
 
+// Children are memoised and receive only the values they render.
+// `actions`, `setSettingsOpen`, `setActiveMetric` and `fenInputRef` must stay
+// referentially stable.
 export default function App({ githubUrl }) {
-    const explorer = useExplorer();
+    const {
+        ready, fen, variant, locked, canBack, canForward, moveHistory, startFen, historyInitialized,
+        fenError, tb, autoplayMetric, autoplayAvailability, lockAutoplayDisabled, showRootRow,
+        autoplayDelayMs, align, settingsOpen, setSettingsOpen, pgnDialogOpen, pgnError,
+        toasts, activeMetric, setActiveMetric, fenInputRef, actions,
+    } = useExplorer();
+    const turn = fen.split(' ')[1] === 'b' ? 'b' : 'w';
 
     return (
         <>
-            <Header githubUrl={githubUrl} setSettingsOpen={explorer.setSettingsOpen} />
+            <Header githubUrl={githubUrl} setSettingsOpen={setSettingsOpen} />
 
-            <main className="content" role="main">
+            <main className="content" role="main" data-align={align}>
                 <div className="left-col">
-                    <FenBar explorer={explorer} />
-                    <BoardArea explorer={explorer} />
+                    <FenBar
+                        fenInputRef={fenInputRef} actions={actions} ready={ready} locked={locked}
+                        lockAutoplayDisabled={lockAutoplayDisabled} canBack={canBack} canForward={canForward}
+                        fenError={fenError} tbError={tb.error}
+                    />
+                    <BoardArea turn={turn} onTurnChange={actions.setTurn} />
                 </div>
 
                 <div className="right-col">
-                    <ResultsPanel explorer={explorer} />
+                    <ResultsPanel
+                        tb={tb} activeMetric={activeMetric} setActiveMetric={setActiveMetric}
+                        autoplayMetric={autoplayMetric} autoplayAvailability={autoplayAvailability} actions={actions}
+                    />
                 </div>
 
                 <div className="pgn-col">
-                    <PgnPanel explorer={explorer} />
+                    <PgnPanel
+                        moveHistory={moveHistory} startFen={startFen}
+                        historyInitialized={historyInitialized} actions={actions}
+                    />
                 </div>
             </main>
 
             <ScreenNav />
 
             <PromotionDialog />
-            <PgnDialog explorer={explorer} />
-            <SettingsPanel explorer={explorer} />
-            <Toasts toasts={explorer.toasts} />
+            <PgnDialog open={pgnDialogOpen} error={pgnError} actions={actions} />
+            <SettingsPanel
+                open={settingsOpen} setOpen={setSettingsOpen} showRootRow={showRootRow}
+                variant={variant} autoplayDelayMs={autoplayDelayMs} align={align} actions={actions}
+            />
+            <Toasts toasts={toasts} />
         </>
     );
 }

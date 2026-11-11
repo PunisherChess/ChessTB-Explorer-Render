@@ -1,3 +1,5 @@
+/** Icon.jsx: inline SVG icon set */
+
 const STROKE_WIDTH = { check: 2.5, close: 2.5 };
 
 const PATHS = {
@@ -9,11 +11,16 @@ const PATHS = {
     arrowLeft: <><path d="M19 12H5" /><polyline points="12 19 5 12 12 5" /></>,
     arrowRight: <><path d="M5 12h14" /><polyline points="12 5 19 12 12 19" /></>,
     download: <><path d="M12 3v12" /><polyline points="7 10 12 15 17 10" /><path d="M4 19h16" /></>,
-    upload: <><path d="M12 21V9" /><polyline points="7 14 12 9 17 14" /><path d="M4 5h16" /></>,
+    fileIn: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M12 11.5V19" /><path d="m9 16 3 3 3-3" /></>,
+    fileOut: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M12 19v-7.5" /><path d="m9 14.5 3-3 3 3" /></>,
     lockOpen: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0" /></>,
     lockClosed: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
-    gauge: <><path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M12 14 16 8" /><path d="M5 19a9 9 0 1 1 14 0" /></>,
     code: <><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>,
+    grid: <><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /><path d="M12 3.5v17M3.5 12h17" /></>,
+    bars: <path d="M5 19v-8M12 19V5M19 19v-5" />,
+    play: <polygon points="6 3 20 12 6 21 6 3" fill="currentColor" />,
+    stop: <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />,
+    list: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="0.5" /><circle cx="4.5" cy="12" r="0.5" /><circle cx="4.5" cy="18" r="0.5" /></>,
     settings: (
         <>
             <circle cx="12" cy="12" r="3" />

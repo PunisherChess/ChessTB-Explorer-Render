@@ -23,7 +23,7 @@ licensed under the terms in [`LICENSE`](LICENSE) (`GPL-3.0-or-later`).
 | [React](https://github.com/facebook/react) | 18.3.1 | `MIT` | Frontend |
 | [React DOM](https://github.com/facebook/react) | 18.3.1 | `MIT` | Frontend |
 | [Scheduler](https://github.com/facebook/react) | 0.23.2 | `MIT` | Frontend |
-| [Chessground](https://github.com/lichess-org/chessground) | 10.1.1 | `GPL-3.0-or-later` | Frontend |
+| [Chessground](https://github.com/lichess-org/chessground) | 10.5.0 | `GPL-3.0-or-later` | Frontend |
 | [chessops](https://github.com/niklasf/chessops) | 0.15.1 | `GPL-3.0-or-later` | Frontend |
 | [@badrap/result](https://github.com/badrap/result) | 0.3.1 | `MIT` | Frontend |
 | [Inter](https://rsms.me/inter/) | — | `OFL-1.1` | Font |
@@ -62,10 +62,10 @@ bundled into `static/dist/app.js` - see
 
 | File | Component | Version | License | Source |
 |---|---|---|---|---|
-| `chessground.min.js` | Chessground | 10.1.1 | `GPL-3.0-or-later` | [lichess-org/chessground](https://github.com/lichess-org/chessground) |
+| `chessground.min.js` | Chessground | 10.5.0 | `GPL-3.0-or-later` | [lichess-org/chessground](https://github.com/lichess-org/chessground) |
 | `chessops/*.js` (excl. `badrap-result.js`) | chessops | 0.15.1 | `GPL-3.0-or-later` | [niklasf/chessops](https://github.com/niklasf/chessops) |
 | `chessops/badrap-result.js` | @badrap/result | 0.3.1 | `MIT` | [badrap/result](https://github.com/badrap/result) |
-| `chessground.base.css` | Chessground stylesheet | 10.1.1 | `GPL-3.0-or-later` | [lichess-org/chessground](https://github.com/lichess-org/chessground) |
+| `chessground.base.css` | Chessground stylesheet | 10.5.0 | `GPL-3.0-or-later` | [lichess-org/chessground](https://github.com/lichess-org/chessground) |
 
 `frontend/src/vendor/` holds the pinned ESM distribution and its
 `@badrap/result` runtime dependency; `vite build` bundles them into
@@ -90,8 +90,8 @@ only and are not distributed to clients.
 
 | File(s) | Typeface | License | Author |
 |---|---|---|---|
-| `Inter-Regular.woff2`, `Inter-Medium.woff2`, `Inter-SemiBold.woff2` | Inter | `OFL-1.1` | [Rasmus Andersson](https://rsms.me/inter/) |
-| `JetBrainsMono-Regular.woff2`, `JetBrainsMono-Medium.woff2` | JetBrains Mono | `OFL-1.1` | [JetBrains](https://www.jetbrains.com/lp/mono/) |
+| `Inter-Regular.woff2`, `Inter-Medium.woff2`, `Inter-SemiBold.woff2`, `Inter-Bold.woff2` | Inter | `OFL-1.1` | [Rasmus Andersson](https://rsms.me/inter/) |
+| `JetBrainsMono-Regular.woff2`, `JetBrainsMono-Medium.woff2`, `JetBrainsMono-Bold.woff2`, `JetBrainsMono-Italic.woff2` | JetBrains Mono | `OFL-1.1` | [JetBrains](https://www.jetbrains.com/lp/mono/) |
 
 The build copies the fonts to `static/dist/fonts/`.
 

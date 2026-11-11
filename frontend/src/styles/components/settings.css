@@ -40,18 +40,10 @@
 .settings-row { border-bottom: 1px solid var(--border); }
 .settings-row:last-child { border-bottom: none; }
 
-/* ── Settings toggle rows (Show Root Row, Chess960 Mode) ──────────────
+/* ── Settings toggle rows (Root Score, Variant, Alignment) ────────────
    A label + slider switch. Reuses .settings-row for the shared
    border-bottom/last-child treatment. */
 .settings-row--toggle { padding: var(--space-3) 0.875rem var(--space-3) var(--space-4); }
-.settings-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    cursor: pointer;
-    user-select: none;
-}
 .settings-toggle__label {
     font-size: var(--text-xs);
     font-weight: 600;
@@ -89,10 +81,11 @@
 .toggle-switch__track::before {
     content: '';
     position: absolute;
-    top: 0.0625rem;
-    left: 0.0625rem;
+    top: 50%;
+    left: calc(0.125rem - 1px);   /* 0.125rem ring on every side, less the track border */
     width: 1rem;
     height: 1rem;
+    margin-top: -0.5rem;
     border-radius: 50%;
     background: var(--text-dim);
     transition: transform var(--tr), background var(--tr);
@@ -109,6 +102,40 @@
     outline: 2px solid var(--gold);
     outline-offset: 2px;
 }
+
+/* Two-way variant: the knob is gold and the track stays neutral in both positions. */
+.toggle-switch--choice .toggle-switch__input + .toggle-switch__track::before { background: var(--gold); }
+.toggle-switch--choice .toggle-switch__input:checked + .toggle-switch__track {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+}
+
+/* ── Two-way toggle rows (Root Score, Variant, Alignment) ─────────────
+   The title column has the same width in every row, so the switches line
+   up. The switch is centered in the space after it, with the left option
+   right-aligned against the switch and the right option left-aligned
+   against it. The Alignment row is shown at desktop widths only
+   (desktop.css). */
+.settings-choice-row {
+    display: grid;
+    grid-template-columns: 4.25rem 1fr auto 1fr;
+    align-items: center;
+    user-select: none;
+}
+.settings-choice__option--left {
+    justify-self: end;
+    padding-right: var(--space-2);
+}
+.settings-choice__option--right { padding-left: var(--space-2); }
+.settings-choice__option {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color var(--tr);
+}
+.settings-choice__option.is-active { color: var(--text); }
+.settings-row--align { display: none; }
 
 /* ── Settings slider row (Autoplay Delay) ─────────────────────────────
    Same standalone-row treatment as the toggle row above (label + control,
@@ -236,8 +263,8 @@
     white-space: nowrap;
 }
 
-@media (max-width: 640px) {
-    .settings-panel { width: min(280px, calc(100vw - 24px)); }
+@media (max-width: 40em) {
+    .settings-panel { width: min(17.5rem, calc(100vw - 1.5rem)); }
 }
 
 /* ── Keyboard shortcuts list ───────────────────────────────────────── */

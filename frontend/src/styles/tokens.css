@@ -1,18 +1,28 @@
 :root {
     /* Backgrounds */
-    --bg:           #0e0d0c;
-    --surface:      #161513;
-    --surface-2:    #1d1b18;
-    --surface-3:    #252320;
+    --bg:           #070809;
+    --surface:      #0f1113;
+    --surface-2:    #151719;
+    --surface-3:    #1e2125;
 
     /* Borders */
-    --border:       #2c2a27;
-    --border-2:     #3d3a36;
+    --border:       #292d32;
+    --border-2:     #3b4047;
+    --row-line:     rgba(243, 240, 232, 0.075);
+    --control-border: var(--border);
+
+    /* Column divider shadow, shared by the results table and the PGN move list */
+    --col-divider:  inset 1px 0 0 var(--border-2);
+
+    /* Hairline rule and tonal control fills */
+    --hairline:     rgba(243, 240, 232, 0.075);
+    --tonal:        rgba(243, 240, 232, 0.045);
+    --tonal-hi:     rgba(243, 240, 232, 0.085);
 
     /* Text */
-    --text:         #e8e4de;
-    --text-dim:     #9c9992;
-    --text-muted:   #96908a;
+    --text:         #f3f0e8;
+    --text-dim:     #aaa69d;
+    --text-muted:   #827e76;
 
     /* Spare-piece tray - warm beige matching board light squares */
     --tray-bg:      #b0a998;
@@ -20,17 +30,18 @@
     --tray-border:  #8a8070;
 
     /* Accent */
-    --gold:         #c89b3c;
-    --gold-dim:     #7a5e22;
-    --gold-glow:    rgba(200, 155, 60, 0.14);
+    --gold:         #f1bd52;
+    --gold-dim:     #a97826;
+    --gold-heading: #ffd477;
+    --gold-glow:    rgba(241, 189, 82, 0.18);
 
     /* Outcome colours */
-    --win:          #4ade80;
-    --loss:         #f87171;
-    --loss-glow:    rgba(248, 113, 113, 0.14);
-    --draw:         #94a3b8;
-    --amber:        #d9a441;
-    --blue:         #60a5fa;
+    --win:          #43b47b;
+    --loss:         #ef7169;
+    --loss-glow:    rgba(239, 113, 105, 0.15);
+    --draw:         #a6a8ae;
+    --amber:        #e8a950;
+    --blue:         #82b0e2;
 
     /* Typography */
     --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -42,13 +53,13 @@
     --board-highlight: rgba(155, 199, 0, 0.41);
 
     /* Progress */
-    --progress-from: #3b82f6;
-    --progress-to:   #60a5fa;
+    --progress-from: #d99d32;
+    --progress-to:   #ffd477;
 
     /* Turn indicators */
-    --pip-black-bg:     #1a1816;
-    --pip-black-border: #555;
-    --turn-active-bg:   #242220;
+    --pip-black-bg:     #070809;
+    --pip-black-border: #8f8b82;
+    --turn-active-bg:   rgba(241, 189, 82, 0.09);
 
     /* Type scale */
     --text-xs: 0.75rem;
@@ -70,14 +81,20 @@
 
     /* Tables */
     --thead-row-h:         1.75rem;
+    --col-row-h:           calc(1.875rem + 1px);
     --thead-root-h:        1.9375rem;
-    --pgn-rank-w:          2.0625rem;
-    --pgn-rank-w-compact:  3.125rem;
+    --autoplay-btn-h:      1rem;
+    /* Rank column of the results table and the PGN panel: at least two mono
+       digits plus --rank-pad of horizontal padding. */
+    --rank-pad:            0.8125rem;
 
     /* Controls */
     --control-h:    2rem;
     --control-h-sm: 1.75rem;
     --touch-target: 2.75rem;
+
+    /* Metric strip inset: the 1px hairline plus a 1px gap around the auto-play button */
+    --strip-gap:    0.125rem;
 
     /* FEN row: Lock, Back and Next share one width, and the gap from the FEN
        input to Lock equals the gap from Back to Next. 1.9375rem is 31px at a
@@ -91,11 +108,11 @@
     --r-lg: 0.5rem;
 
     /* Elevation */
-    --shadow:       0 8px 30px rgba(0,0,0,.55);
-    --shadow-pop:   0 8px 24px rgba(0,0,0,.45);
-    --shadow-panel: -6px 10px 32px rgba(0,0,0,0.6);
-    --shadow-board: 0 0 0 1px var(--border), 0 14px 38px rgba(0,0,0,0.6);
-    --scrim:        rgba(0,0,0,.72);
+    --shadow:       0 8px 30px rgba(0, 0, 0, .62);
+    --shadow-pop:   0 8px 24px rgba(0, 0, 0, .52);
+    --shadow-panel: -6px 10px 32px rgba(0, 0, 0, .68);
+    --shadow-board: 0 0 0 1px var(--border), 0 14px 38px rgba(0, 0, 0, .68);
+    --scrim:        rgba(0, 0, 0, .80);
 
     /* Motion */
     --dur:  0.14s;
@@ -103,14 +120,22 @@
 
     /* Board width and height, read by .board-wrap, #board, cg-container,
        cg-board and .spare-tray; .spare-piece derives its size from it.
-       Sized against the tighter of viewport width and height and never
-       above --board-size-max, which also bounds the left column.
-       --board-size-cap is the width-based limit; --board-size is overridden
-       above 1180px (layout.css) and below 768px (responsive.css). */
+       --board-size is --board-size-fit rounded down to a multiple of 8px, so
+       each square is a whole number of pixels. --board-size-fit is sized
+       against the tighter of viewport width and height and never above
+       --board-size-max, which also bounds the left column. It is a pixel
+       ceiling and does not scale with the root font size.
+       --board-size-cap is the width-based limit; --board-size-fit is
+       overridden above 73.75em (layout.css) and below 48em (responsive.css). */
     --board-size-max: 720px;
     --board-size-cap: min(var(--board-size-max), clamp(18.75rem, min(23.4375vw, 41.6667vh), 31.5rem));
-    --board-size: var(--board-size-cap);
+    --board-size-fit: var(--board-size-cap);
+    --board-size: var(--board-size-fit);
     --spare-size:  calc(var(--board-size) / 8);
+}
+
+@supports (width: round(down, 100.7px, 8px)) {
+    :root { --board-size: round(down, var(--board-size-fit), 8px); }
 }
 
 @media (hover: none) and (pointer: coarse) {

@@ -1,20 +1,28 @@
+/** FenBar.jsx: FEN input and board action buttons */
+
+import { memo, useState } from 'react';
 import Button from './ui/Button.jsx';
 import Icon from './ui/Icon.jsx';
 
-export default function FenBar({ explorer }) {
-    const { fenInputRef, actions, ready, fen, locked, lockAutoplayDisabled, canBack, canForward, fenError, tb } = explorer;
-    const errorMessage = fenError ?? tb.error?.message ?? '';
-    const isCoverageError = !fenError && !!tb.error?.isCoverage;
+// Uncontrolled: useExplorer writes the position into the input via fenInputRef.
+function FenBar({ fenInputRef, actions, ready, locked, lockAutoplayDisabled, canBack, canForward, fenError, tbError }) {
+    const errorMessage = fenError ?? tbError?.message ?? '';
+    const isCoverageError = !fenError && !!tbError?.isCoverage;
+    const [applyPressed, setApplyPressed] = useState(false);
 
-    function onFenKeyDown(e) {
-        if (e.key === 'Enter') { e.preventDefault(); actions.applyFen(e.currentTarget.value.trim()); }
-    }
-    function onApplyClick() {
+    function submitFen() {
         const v = fenInputRef.current?.value.trim();
         if (v) actions.applyFen(v);
     }
-    function onLockClick(e) {
-        if (e.currentTarget.getAttribute('aria-disabled') === 'true') return;
+    // Enter in the FEN box highlights Apply for as long as the key is held.
+    function onFenKeyDown(e) {
+        if (e.key === 'Enter') { e.preventDefault(); setApplyPressed(true); submitFen(); }
+    }
+    function onFenKeyUp(e) {
+        if (e.key === 'Enter') setApplyPressed(false);
+    }
+    function onLockClick() {
+        if (lockAutoplayDisabled) return;
         actions.setLockedAction(!locked);
     }
 
@@ -25,17 +33,17 @@ export default function FenBar({ explorer }) {
                     <span className="fen-input-wrap__label" aria-hidden="true">FEN</span>
                     <input
                         id="fen-input" className="fen-input" type="text"
-                        ref={fenInputRef} defaultValue={fen}
-                        placeholder="Paste FEN here…" disabled={!ready}
+                        ref={fenInputRef}
+                        placeholder="Enter FEN here" disabled={!ready}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false"
                         aria-label="FEN position string"
-                        onKeyDown={onFenKeyDown}
+                        onKeyDown={onFenKeyDown} onKeyUp={onFenKeyUp} onBlur={() => setApplyPressed(false)}
                     />
                     <button id="lock-btn" type="button"
                             className={`btn btn--icon-only btn--lock${locked ? ' is-locked' : ''}${lockAutoplayDisabled ? ' is-autoplay-disabled' : ''}`}
                             aria-pressed={locked} aria-disabled={lockAutoplayDisabled}
                             aria-label="Lock board to legal moves only"
-                            title={lockAutoplayDisabled ? 'Stop auto-play to change Lock' : (locked ? 'Unlock board' : 'Lock board (legal moves only)')}
+                            title={lockAutoplayDisabled ? 'Locked during auto-play' : (locked ? 'Play mode: unlock to edit the position' : 'Edit mode: lock to play legal moves')}
                             onClick={onLockClick}>
                         <Icon name="lockOpen" className="btn__icon lock-icon lock-icon--unlocked" />
                         <Icon name="lockClosed" className="btn__icon lock-icon lock-icon--locked" />
@@ -43,12 +51,12 @@ export default function FenBar({ explorer }) {
                 </div>
 
                 <div className="fen-actions" role="toolbar" aria-label="Board actions">
-                    <Button id="apply-btn" variant="primary" grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={onApplyClick}>Apply</Button>
-                    <Button id="flip-btn" grow icon="flip" title="Flip board (F)" onClick={() => actions.flip()}>Flip</Button>
-                    <Button id="clear-btn" grow icon="trash" title="Clear board (C)" onClick={() => actions.clearBoard()}>Clear</Button>
-                    <Button id="copy-btn" grow icon="copy" title="Copy FEN to clipboard" aria-label="Copy FEN to clipboard" onClick={() => actions.copyFen()}>Copy</Button>
-                    <Button id="back-btn" iconOnly icon="arrowLeft" title="Undo (←)" aria-label="Undo" disabled={!canBack} onClick={() => actions.goBack()} />
-                    <Button id="forward-btn" iconOnly icon="arrowRight" title="Redo (→)" aria-label="Redo" disabled={!canForward} onClick={() => actions.goForward()} />
+                    <Button id="apply-btn" className={applyPressed ? 'is-pressed' : ''} grow icon="check" title="Apply FEN (Enter)" disabled={!ready} onClick={submitFen}>Apply</Button>
+                    <Button id="flip-btn" grow icon="flip" title="Flip board (F)" onClick={actions.flip}>Flip</Button>
+                    <Button id="clear-btn" grow icon="trash" title="Clear board (C)" onClick={actions.clearBoard}>Clear</Button>
+                    <Button id="copy-btn" grow icon="copy" title="Copy FEN to clipboard" aria-label="Copy FEN to clipboard" onClick={actions.copyFen}>Copy</Button>
+                    <Button id="back-btn" iconOnly icon="arrowLeft" title="Undo (←)" aria-label="Undo" disabled={!canBack} onClick={actions.goBack} />
+                    <Button id="forward-btn" iconOnly icon="arrowRight" title="Redo (→)" aria-label="Redo" disabled={!canForward} onClick={actions.goForward} />
                 </div>
             </div>
 
@@ -58,3 +66,5 @@ export default function FenBar({ explorer }) {
         </>
     );
 }
+
+export default memo(FenBar);

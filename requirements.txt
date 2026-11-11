@@ -41,10 +41,10 @@ chess @ git+https://github.com/noobpwnftw/python-chess.git@add-chesstb-tablebase
 # --- C-accelerated tablebase block decompression -------------------------
 # chess.chesstb picks this up itself at import time and uses it for block
 # decompression wherever it's installed, falling back to its own pure-Python
-# decoder otherwise -- app.py doesn't reference it directly. The
+# decoder otherwise - app.py doesn't reference it directly. The
 # C-accelerated path releases the GIL during decode, which is what lets
 # PROBE_THREADS achieve real parallelism instead of queueing behind the
-# interpreter lock. Not a hard requirement -- chess.chesstb works without
+# interpreter lock. Not a hard requirement - chess.chesstb works without
 # it at lower performance. Installation is recommended for production use.
 lz4>=4.0,<5.0
 

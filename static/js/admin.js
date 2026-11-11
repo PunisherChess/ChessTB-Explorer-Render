@@ -1,59 +1,25 @@
 /**
  * admin.js: ChessTB Admin Dashboard
  *
- * Client-side logic for templates/admin.html, which renders one of two
- * states depending on authentication:
- *   - Login form: wires the token input + login button to POST /admin/login,
- *     then reloads the page on success (the new session cookie makes the
- *     next GET /admin render the dashboard instead).
- *   - Dashboard: polls the cache-stats endpoint, renders the two cache
- *     cards and the thread-pool card, and wires the refresh/clear/logout
- *     buttons.
+ * Client-side logic for templates/admin.html: polls the cache-stats
+ * endpoint, renders the two cache cards and the thread-pool card, and
+ * wires the refresh and clear buttons.
  * Kept as an external file - with clicks bound via addEventListener rather
  * than inline onclick="" - because the app's Content-Security-Policy
  * (`script-src 'self'`, set by app.py's after_request hook) blocks both
  * inline <script> bodies and inline event handler attributes.
  */
 
-function _setStatus(elId, msg, cls) {
-  const el = document.getElementById(elId);
+function setStatus(msg, cls) {
+  const el = document.getElementById('status-msg');
   if (!el) return;
   el.textContent = msg;
   el.className = 'status ' + (cls || '');
 }
-function setStatus(msg, cls)      { _setStatus('status-msg', msg, cls); }
-function setLoginStatus(msg, cls) { _setStatus('login-status', msg, cls); }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-async function login() {
-  const input = document.getElementById('login-token-input');
-  try {
-    const r = await fetch('/admin/login', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ token: input.value }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok) {
-      window.location.reload();
-    } else {
-      setLoginStatus(j.error || 'Login failed.', 'err');
-    }
-  } catch (e) {
-    setLoginStatus('Cannot reach backend.', 'err');
-  }
-}
-
-async function logout() {
-  try {
-    await fetch('/admin/logout', { method: 'POST' });
-  } finally {
-    window.location.reload();
-  }
-}
-
-// A brand-new or just-cleared cache has 0 hits and 0 misses, and a
+// A brand-new or cleared cache has 0 hits and 0 misses, and a
 // misconfigured one can have maxsize 0 - both make the ratios below NaN
 // or Infinity rather than a real percentage.
 function _pct(value) {
@@ -138,16 +104,6 @@ async function clearCaches() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const loginBtn = document.getElementById('login-btn');
-  if (loginBtn) {
-    loginBtn.addEventListener('click', login);
-    document.getElementById('login-token-input')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') login();
-    });
-    return;   // login page only - the dashboard elements below are not rendered
-  }
-
-  document.getElementById('logout-btn')?.addEventListener('click', logout);
   document.getElementById('refresh-btn')?.addEventListener('click', loadStats);
   document.getElementById('clear-btn')?.addEventListener('click', clearCaches);
 

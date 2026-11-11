@@ -1,0 +1,68 @@
+/* ── Desktop visual style ───────────────────────────────────────────────
+   Above 73.75em, controls outside the FEN block and panel headers are ghost
+   buttons with a hairline border, panels keep a bordered 6px container, and
+   the three columns share the board column's height. The FEN box and the
+   buttons in the FEN block and panel headers keep the filled style used at
+   the other widths. Shared rules are in surface.css. */
+@media (min-width: 73.8125em) {
+    :root {
+        --seg-pad: 0.125rem;
+        --seg-bg: var(--bg);
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    .site-header__title {
+        font-size: 0.9375rem;
+        letter-spacing: 0;
+    }
+    .site-header__sub {
+        font-size: 0.6875rem;
+        letter-spacing: 0.14em;
+        color: var(--text-muted);
+    }
+    .site-header__link--icon {
+        width: 2rem;
+        height: 2rem;
+        border-radius: var(--r-sm);
+    }
+    .site-header__link--icon:hover { background: var(--tonal-hi); }
+    .site-header__link--icon .icon {
+        width: 1.125rem;
+        height: 1.125rem;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .content { align-content: center; }
+    .content[data-align="top"] { align-content: start; }
+    .left-col { gap: var(--space-1); }
+    .fen-block { gap: var(--space-2); }
+    .error-line {
+        min-height: 1.125rem;
+        padding-left: 0;
+    }
+
+    /* ── Controls ───────────────────────────────────────────────────── */
+    .btn:not(.btn--col-autoplay):not(:is(.fen-block, .panel-header, .metric-strip) .btn) {
+        border-color: var(--border);
+        background: transparent;
+        font-weight: 500;
+    }
+    .btn:hover:not(:disabled):not(.is-autoplay-disabled):not(:is(.fen-block, .panel-header, .metric-strip) .btn) {
+        border-color: var(--border-2);
+        background: var(--tonal);
+        color: var(--text);
+    }
+    .btn--compact:not(.results-panel .btn) { padding-inline: var(--space-3); }
+
+    /* ── Panels ─────────────────────────────────────────────────────── */
+    .panel { border-radius: var(--r-md); }
+    .panel-header {
+        min-height: 2.75rem;
+        padding: var(--space-2) var(--space-4);
+    }
+    .metric-bar { padding: var(--space-3) var(--space-4); }
+    .metric-strip { --strip-h: 2.125rem; }
+
+    /* ── Settings ───────────────────────────────────────────────────── */
+    .settings-row--align { display: block; }
+}

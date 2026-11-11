@@ -1,3 +1,5 @@
+/** Segmented.jsx: segmented radio and tab control */
+
 import { useRef } from 'react';
 
 export default function Segmented({ label, options, value, onChange, variant = 'radio', className = '', itemClassName = '' }) {
